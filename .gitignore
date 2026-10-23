@@ -1,0 +1,5 @@
+.godot/
+/android/
+*.translation
+*.keystore
+*.jks
