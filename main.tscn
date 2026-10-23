@@ -1,0 +1,60 @@
+[gd_scene format=3 uid="uid://co1kym514p374"]
+
+[ext_resource type="Script" uid="uid://b64kc333lwf7r" path="res://main.gd" id="1_0xm2m"]
+[ext_resource type="Script" uid="uid://b7snt8kbdfqhq" path="res://draw_canvas.gd" id="2_h2yge"]
+
+[node name="Main" type="Node2D" unique_id=1304410039]
+script = ExtResource("1_0xm2m")
+
+[node name="DrawCanvas" type="Node2D" parent="." unique_id=197877344]
+script = ExtResource("2_h2yge")
+metadata/_custom_type_script = "uid://b7snt8kbdfqhq"
+
+[node name="Stroke" type="Line2D" parent="DrawCanvas" unique_id=159583323]
+width = 6.0
+joint_mode = 2
+begin_cap_mode = 2
+end_cap_mode = 2
+
+[node name="Tops" type="Node2D" parent="." unique_id=772666232]
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=593303410]
+
+[node name="Root" type="Control" parent="UI" unique_id=815713503]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/Root" unique_id=221016022]
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -107.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="VBox" type="VBoxContainer" parent="UI/Root/Panel" unique_id=1009962884]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="UI/Root/Panel/VBox" unique_id=463216981]
+layout_mode = 2
+
+[node name="Buttons" type="HBoxContainer" parent="UI/Root/Panel/VBox" unique_id=50383398]
+layout_mode = 2
+
+[node name="ClearButton" type="Button" parent="UI/Root/Panel/VBox/Buttons" unique_id=541578962]
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Clear"
+
+[node name="SpawnButton" type="Button" parent="UI/Root/Panel/VBox/Buttons" unique_id=2037165210]
+layout_mode = 2
+text = "Spawn"
