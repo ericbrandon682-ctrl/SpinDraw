@@ -1,8 +1,8 @@
 class_name TopStats
 extends RefCounted
 
-const MIN_AREA := 1500.0
-const MAX_AREA := 60000.0
+const MIN_AREA := 8000.0
+const MAX_AREA := 350000.0
 
 var area: float
 var size_t: float        # 0 = tiny, 1 = huge

@@ -8,7 +8,7 @@ var stats: TopStats
 var hp: int
 
 ## Call BEFORE add_child. Points are already relative to the centroid.
-func setup(hull_local: PackedVector2Array, stroke_local: PackedVector2Array,
+func setup(hull_local: PackedVector2Array, strokes_local: Array,
 		p_stats: TopStats, color: Color) -> void:
 	stats = p_stats
 	hp = stats.max_hp
@@ -21,7 +21,6 @@ func setup(hull_local: PackedVector2Array, stroke_local: PackedVector2Array,
 	continuous_cd = RigidBody2D.CCD_MODE_CAST_RAY
 	contact_monitor = true
 	max_contacts_reported = 4
-	# Origin = centroid, so force the center of mass to the local origin.
 	center_of_mass_mode = RigidBody2D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector2.ZERO
 	angular_velocity = stats.spin_speed
@@ -36,16 +35,17 @@ func setup(hull_local: PackedVector2Array, stroke_local: PackedVector2Array,
 	col.polygon = hull_local
 	add_child(col)
 
-	# Visible player drawing
-	var line := Line2D.new()
-	line.points = stroke_local
-	line.width = 6.0
-	line.default_color = color
-	line.joint_mode = Line2D.LINE_JOINT_ROUND
-	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
-	line.end_cap_mode = Line2D.LINE_CAP_ROUND
-	line.antialiased = true
-	add_child(line)
+	# Visible player drawing (one Line2D per stroke)
+	for s in strokes_local:
+		var line := Line2D.new()
+		line.points = s
+		line.width = 6.0
+		line.default_color = color
+		line.joint_mode = Line2D.LINE_JOINT_ROUND
+		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+		line.end_cap_mode = Line2D.LINE_CAP_ROUND
+		line.antialiased = true
+		add_child(line)
 
 func take_damage(amount: int) -> void:
 	hp = maxi(hp - amount, 0)

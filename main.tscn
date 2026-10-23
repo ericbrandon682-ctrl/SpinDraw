@@ -30,21 +30,22 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="Panel" type="PanelContainer" parent="UI/Root" unique_id=221016022]
-custom_minimum_size = Vector2(0, 160)
+custom_minimum_size = Vector2(280, 0)
 layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
+anchors_preset = 11
+anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -107.0
-grow_horizontal = 2
-grow_vertical = 0
+offset_left = -113.0
+grow_horizontal = 0
+grow_vertical = 2
 
 [node name="VBox" type="VBoxContainer" parent="UI/Root/Panel" unique_id=1009962884]
 layout_mode = 2
 
 [node name="StatusLabel" type="Label" parent="UI/Root/Panel/VBox" unique_id=463216981]
 layout_mode = 2
+autowrap_mode = 3
 
 [node name="Buttons" type="HBoxContainer" parent="UI/Root/Panel/VBox" unique_id=50383398]
 layout_mode = 2
