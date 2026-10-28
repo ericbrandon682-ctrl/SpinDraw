@@ -19,7 +19,7 @@ static func from_area(a: float) -> TopStats:
 	# Big = tanky and heavy but slow. Small = glass cannon, fast and fast-spinning.
 	s.max_hp = int(lerpf(40.0, 400.0, t))
 	s.mass = lerpf(0.5, 8.0, t)
-	s.max_speed = lerpf(700.0, 250.0, t)
+	s.max_speed = lerpf(1400.0, 500.0, t)
 	s.spin_speed = lerpf(30.0, 8.0, t)
 	return s
 
