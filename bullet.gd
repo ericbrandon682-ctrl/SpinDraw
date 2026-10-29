@@ -3,7 +3,7 @@ extends RigidBody2D
 
 const SPEED := 500.0
 const MAX_BOUNCES := 1            # normal projectiles
-const RICOCHET_MAX_BOUNCES := 3   # Self-Ricochet
+const RICOCHET_MAX_BOUNCES := 6   # Self-Ricochet
 const LIFETIME := 8.0
 
 var owner_top: Top
