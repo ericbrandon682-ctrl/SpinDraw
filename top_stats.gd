@@ -16,11 +16,10 @@ static func from_area(a: float) -> TopStats:
 	s.area = a
 	s.size_t = clampf(inverse_lerp(MIN_AREA, MAX_AREA, a), 0.0, 1.0)
 	var t := s.size_t
-	# Big = tanky and heavy but slow. Small = glass cannon, fast and fast-spinning.
-	s.max_hp = int(lerpf(40.0, 400.0, t))
-	s.mass = lerpf(0.5, 8.0, t)
-	s.max_speed = lerpf(1400.0, 500.0, t)
-	s.spin_speed = lerpf(30.0, 8.0, t)
+	s.max_hp = int(lerpf(300.0, 500.0, t))      # big has ~1.4x HP, not 2x+
+	s.mass = lerpf(1.0, 2.0, t)                 # big has 2x mass, not 4x+
+	s.max_speed = lerpf(1400.0, 900.0, t)
+	s.spin_speed = lerpf(30.0, 12.0, t)
 	return s
 
 func rpm() -> int:

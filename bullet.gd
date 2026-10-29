@@ -1,8 +1,9 @@
 class_name Bullet
 extends RigidBody2D
 
-const SPEED := 650.0
-const MAX_BOUNCES := 6
+const SPEED := 500.0
+const MAX_BOUNCES := 1            # normal projectiles
+const RICOCHET_MAX_BOUNCES := 3   # Self-Ricochet
 const LIFETIME := 8.0
 
 var owner_top: Top
@@ -13,6 +14,7 @@ var life := LIFETIME
 var ricochet := false
 var burn := false
 var absorbed := false
+var burn_dps := 4
 
 ## Strokes are already centered on (0,0) and battle-sized.
 func setup(p_owner: Top, strokes: Array, radius: float, dmg: int, dir: Vector2,
@@ -67,7 +69,7 @@ func setup(p_owner: Top, strokes: Array, radius: float, dmg: int, dir: Vector2,
 		line.joint_mode = Line2D.LINE_JOINT_ROUND
 		line.begin_cap_mode = Line2D.LINE_CAP_ROUND
 		line.end_cap_mode = Line2D.LINE_CAP_ROUND
-		line.antialiased = true
+		line.antialiased = false
 		add_child(line)
 
 func _physics_process(delta: float) -> void:
@@ -81,7 +83,8 @@ func _physics_process(delta: float) -> void:
 
 func _on_wall(_body: Node) -> void:
 	bounces += 1
-	if bounces > MAX_BOUNCES:
+	var limit := RICOCHET_MAX_BOUNCES if ricochet else MAX_BOUNCES
+	if bounces > limit:
 		queue_free()
 
 func _on_hit(body: Node) -> void:
@@ -101,5 +104,5 @@ func _on_hit(body: Node) -> void:
 		return
 	t.take_damage(damage)
 	if burn:
-		t.apply_burn()
+		t.apply_burn(burn_dps)
 	queue_free()

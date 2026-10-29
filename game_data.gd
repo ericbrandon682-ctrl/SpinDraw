@@ -9,11 +9,11 @@ var tops: Array = []
 func _ready() -> void:
 	load_tops()
 
-func add_top(area: float, color: Color, strokes: Array, weapon: Dictionary = {}) -> bool:
+func add_top(area: float, color: Color, strokes: Array, weapon: Dictionary = {}, p_name: String = "") -> bool:
 	if tops.size() >= MAX_TOPS:
 		return false
 	tops.append({"area": area, "color": color, "strokes": strokes.duplicate(),
-			"weapon": weapon.duplicate()})
+			"weapon": weapon.duplicate(), "name": p_name})
 	save_tops()
 	return true
 
@@ -48,6 +48,7 @@ func save_tops() -> void:
 			"color": t["color"].to_html(),
 			"strokes": _strokes_to_json(t["strokes"]),
 			"weapon": null,
+			"name": t.get("name", ""),
 		}
 		var w: Dictionary = t.get("weapon", {})
 		if not w.is_empty():
@@ -77,4 +78,5 @@ func load_tops() -> void:
 			"color": Color(d["color"]),
 			"strokes": _strokes_from_json(d["strokes"]),
 			"weapon": weapon,
+			"name": str(d.get("name", "")),
 		})
