@@ -29,7 +29,7 @@ var box: Rect2
 
 # Weapon mode
 var weapon_mode := false
-var attach_required := true   # false for projectile weapons
+var attach_required := true
 var body_count := 0
 var wb_has := false
 var wb_min := Vector2.ZERO
@@ -41,28 +41,34 @@ func _ready() -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	draw_rect(draw_area, Color(1, 1, 1, 0.12), false, 2.0)
-	draw_rect(box, Color(0.4, 1, 0.6, 0.08), true)
-	draw_rect(box, Color(0.4, 1, 0.6, 0.7), false, 3.0)
-	var t := 24.0
-	var col := Color(0.4, 1, 0.6, 0.9)
+	# Graph-paper board
+	draw_rect(draw_area, Color("0d0d1f"))
+	var grid := Color(1, 1, 1, 0.05)
+	var x := draw_area.position.x
+	while x <= draw_area.end.x:
+		draw_line(Vector2(x, draw_area.position.y), Vector2(x, draw_area.end.y), grid, 2.0)
+		x += 40.0
+	var y := draw_area.position.y
+	while y <= draw_area.end.y:
+		draw_line(Vector2(draw_area.position.x, y), Vector2(draw_area.end.x, y), grid, 2.0)
+		y += 40.0
+
+	# Drawing box: white frame with yellow corner blocks
+	draw_rect(box, Color("07070f"))
+	draw_rect(box, Color.WHITE, false, 6.0)
 	for corner in [box.position, Vector2(box.end.x, box.position.y),
 			box.end, Vector2(box.position.x, box.end.y)]:
-		var sx := 1.0 if corner.x == box.position.x else -1.0
-		var sy := 1.0 if corner.y == box.position.y else -1.0
-		draw_line(corner, corner + Vector2(t * sx, 0), col, 5.0)
-		draw_line(corner, corner + Vector2(0, t * sy), col, 5.0)
+		draw_rect(Rect2(corner - Vector2(9, 9), Vector2(18, 18)), UiStyle.YELLOW)
 
 	if weapon_mode:
 		if wb_has:
 			var r := Rect2(wb_min, wb_max - wb_min)
 			var at_limit := r.size.x >= WEAPON_MAX_SIZE - 1.0 or r.size.y >= WEAPON_MAX_SIZE - 1.0
-			var c := Color(1, 0.35, 0.35, 0.8) if at_limit else Color(1, 0.7, 0.3, 0.6)
-			draw_rect(r, c, false, 2.0)
+			draw_rect(r, UiStyle.RED if at_limit else UiStyle.ORANGE, false, 3.0)
 		else:
 			var center := _body_rect().get_center()
 			var half := Vector2.ONE * WEAPON_MAX_SIZE * 0.5
-			draw_rect(Rect2(center - half, half * 2.0), Color(1, 0.7, 0.3, 0.35), false, 2.0)
+			draw_rect(Rect2(center - half, half * 2.0), Color(1, 0.7, 0.3, 0.5), false, 3.0)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not enabled:
@@ -85,13 +91,13 @@ func _near_body(pos: Vector2) -> bool:
 	return false
 
 func _body_rect() -> Rect2:
-	var mn := Vector2(INF, INF)
-	var mx := Vector2(-INF, -INF)
+	var mn := Vector2(1000000.0, 1000000.0)
+	var mx := Vector2(-1000000.0, -1000000.0)
 	for i in body_count:
 		for p in strokes[i]:
 			mn = mn.min(p)
 			mx = mx.max(p)
-	if mn.x == INF:
+	if mn.x > 999999.0:
 		return Rect2(box.get_center(), Vector2.ZERO)
 	return Rect2(mn, mx - mn)
 
@@ -206,7 +212,7 @@ func enter_weapon_mode() -> void:
 	body_count = strokes.size()
 	wb_has = false
 	for l in lines:
-		l.default_color = BODY_GHOST_COLOR
+		l.visible = false   # hide the body while drawing the weapon
 	queue_redraw()
 
 func exit_weapon_mode() -> void:
@@ -214,6 +220,7 @@ func exit_weapon_mode() -> void:
 	weapon_mode = false
 	body_count = 0
 	for l in lines:
+		l.visible = true
 		l.default_color = STROKE_COLOR
 	queue_redraw()
 
@@ -236,7 +243,7 @@ func undo_last_stroke() -> void:
 	if strokes.is_empty():
 		return
 	if weapon_mode and strokes.size() <= body_count:
-		return   # never undo body strokes during the weapon step
+		return
 	strokes.pop_back()
 	lines.pop_back().queue_free()
 	if weapon_mode:
@@ -258,3 +265,48 @@ func clear_drawing() -> void:
 	wb_has = false
 	queue_redraw()
 	stroke_changed.emit(false)
+
+
+# ---------- Loading a saved top for editing ----------
+
+func _bounds_center(group: Array) -> Vector2:
+	var mn := Vector2(1000000.0, 1000000.0)
+	var mx := Vector2(-1000000.0, -1000000.0)
+	for s in group:
+		for p in s:
+			mn = mn.min(p)
+			mx = mx.max(p)
+	if mn.x > 999999.0:
+		return Vector2.ZERO
+	return (mn + mx) * 0.5
+
+func load_shape(body: Array, weapon: Array) -> void:
+	clear_drawing()
+	if body.is_empty():
+		return
+	var body_shift := box.get_center() - _bounds_center(body)
+	for s in body:
+		_add_loaded(s, body_shift, STROKE_COLOR)
+	if not weapon.is_empty():
+		enter_weapon_mode()
+		var weapon_shift := box.get_center() - _bounds_center(weapon)
+		for s in weapon:
+			_add_loaded(s, weapon_shift, WEAPON_COLOR)
+		_recompute_wb()
+	stroke_changed.emit(build_shape().size() > 0)
+
+func _add_loaded(s: PackedVector2Array, shift: Vector2, color: Color) -> void:
+	var pts := PackedVector2Array()
+	for p in s:
+		pts.append((p + shift).clamp(box.position, box.end))
+	var line := Line2D.new()
+	line.width = STROKE_WIDTH
+	line.default_color = color
+	line.joint_mode = Line2D.LINE_JOINT_ROUND
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.antialiased = false
+	line.points = pts
+	add_child(line)
+	strokes.append(pts)
+	lines.append(line)

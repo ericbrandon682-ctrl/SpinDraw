@@ -14,22 +14,33 @@ const COLORS := [Color("ff5d73"), Color("4dd0e1"), Color("ffd166"), Color("95e06
 var undo_btn: Button
 var menu_btn: Button
 var back_btn: Button
+var name_edit: LineEdit
 
 var stage := Stage.BODY
 var body_data := {}
-var name_edit: LineEdit
+var edit_index := -1
 
 func _ready() -> void:
-	$UI.layer = 2
-	canvas.attach_required = false   # weapon type is chosen later, so draw it anywhere
+	RenderingServer.set_default_clear_color(Color("07070f"))
+	canvas.attach_required = false   # weapon type is chosen before battle
 	_build_ui()
 	canvas.stroke_changed.connect(_on_stroke_changed)
 	main_btn.pressed.connect(_on_main)
 	clear_btn.pressed.connect(_on_clear)
 	undo_btn.pressed.connect(canvas.undo_last_stroke)
 	back_btn.pressed.connect(_on_back)
-	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://menu.tscn"))
+	menu_btn.pressed.connect(_to_storage)
 	_set_stage(Stage.BODY)
+
+	edit_index = GameData.editing_index
+	if edit_index >= 0 and edit_index < GameData.tops.size():
+		_load_existing(edit_index)
+	else:
+		edit_index = -1
+
+func _to_storage() -> void:
+	GameData.editing_index = -1
+	get_tree().change_scene_to_file("res://Storage.tscn")
 
 func _build_ui() -> void:
 	panel.custom_minimum_size.x = 300
@@ -53,7 +64,7 @@ func _build_ui() -> void:
 	back_btn = Button.new()
 	back_btn.text = "Back to body"
 	menu_btn = Button.new()
-	menu_btn.text = "Menu"
+	menu_btn.text = "Storage"
 
 	column.add_child(undo_btn)
 	clear_btn.reparent(column)
@@ -66,22 +77,41 @@ func _build_ui() -> void:
 	name_edit = LineEdit.new()
 	name_edit.placeholder_text = "Name your top"
 	name_edit.max_length = 14
-	name_edit.custom_minimum_size.y = 52
+	name_edit.custom_minimum_size.y = 56
+	name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_edit.add_theme_font_size_override("font_size", 24)
+	name_edit.add_theme_color_override("font_color", UiStyle.YELLOW)
+	name_edit.add_theme_color_override("font_placeholder_color", Color("7a7a96"))
+	name_edit.add_theme_color_override("caret_color", UiStyle.WHITE)
+	var name_normal := UiStyle.panel(UiStyle.YELLOW, UiStyle.BLACK, 8)
+	name_normal.set_border_width_all(4)
+	var name_focus := UiStyle.panel(UiStyle.WHITE, UiStyle.BLACK, 8)
+	name_focus.set_border_width_all(4)
+	name_edit.add_theme_stylebox_override("normal", name_normal)
+	name_edit.add_theme_stylebox_override("focus", name_focus)
 	column.add_child(name_edit)
-	column.move_child(name_edit, 1)   # right under the main button
-	
-	UiStyle.style_button(main_btn, UiStyle.GREEN.darkened(0.15), 80, 26)
-	UiStyle.style_button(undo_btn, UiStyle.BLUE.darkened(0.1), 56, 24)
+	column.move_child(name_edit, 1)
+	UiStyle.style_button(main_btn, UiStyle.GREEN, 80, 26)
+	UiStyle.style_button(undo_btn, UiStyle.BLUE, 56, 24)
 	UiStyle.style_button(clear_btn, UiStyle.RED, 56, 24)
 	UiStyle.style_button(back_btn, UiStyle.LAVENDER, 56, 22)
-	UiStyle.style_button(menu_btn, UiStyle.PURPLE.lightened(0.2), 56, 24)
+	UiStyle.style_button(menu_btn, UiStyle.PURPLE, 56, 24)
+
+func _load_existing(i: int) -> void:
+	var data: Dictionary = GameData.tops[i]
+	var wstrokes: Array = data.get("weapon", {}).get("strokes", [])
+	canvas.load_shape(data["strokes"], wstrokes)
+	name_edit.text = str(data.get("name", ""))
+	if not wstrokes.is_empty():
+		body_data = canvas.build_shape()
+		_set_stage(Stage.WEAPON)
+	else:
+		_on_stroke_changed(canvas.build_shape().size() > 0)
 
 func _set_stage(s: Stage) -> void:
 	stage = s
 	var weapon_stage := s == Stage.WEAPON
 	back_btn.visible = weapon_stage
-	name_edit.visible = weapon_stage
 	if weapon_stage:
 		main_btn.text = "SAVE TOP"
 		main_btn.disabled = false
@@ -89,6 +119,8 @@ func _set_stage(s: Stage) -> void:
 	else:
 		main_btn.text = "NEXT: WEAPON"
 		_on_stroke_changed(canvas.build_shape().size() > 0)
+
+# ---------- Buttons ----------
 
 func _on_main() -> void:
 	if stage == Stage.BODY:
@@ -111,15 +143,18 @@ func _on_back() -> void:
 	canvas.exit_weapon_mode()
 	_set_stage(Stage.BODY)
 
+# ---------- Status ----------
+
 func _on_stroke_changed(is_valid: bool) -> void:
 	if stage == Stage.WEAPON:
 		_update_weapon_status()
 		return
 	main_btn.disabled = not is_valid
+	var head := "Editing top\n\n" if edit_index >= 0 else ""
 	if is_valid:
 		var s := TopStats.from_area(canvas.build_shape()["area"])
-		status.text = "Step 1: body\n\nHP: %d\nMass: %.1f\nSpeed: %d\nSpin: %d RPM" % [
-			s.max_hp, s.mass, int(s.max_speed), s.rpm()]
+		status.text = "%sStep 1: body\n\nHP: %d\nMass: %.1f\nSpeed: %d\nSpin: %d RPM" % [
+			head, s.max_hp, s.mass, int(s.max_speed), s.rpm()]
 	elif not canvas.is_drawing and canvas.has_strokes():
 		status.text = "Keep drawing, or shape is too small/flat"
 	else:
@@ -127,27 +162,37 @@ func _on_stroke_changed(is_valid: bool) -> void:
 
 func _update_weapon_status() -> void:
 	var n := canvas.strokes.size() - canvas.body_count
-	status.text = "Step 2: weapon shape (optional)\nDraw it anywhere.\nMax size: %d px\nStrokes: %d\n\nYou choose the weapon type before battle." % [
+	status.text = "Step 2: weapon (optional)\nYour body is hidden.\nDraw the weapon on its own.\nMax size: %d px\nStrokes: %d\n\nYou choose the weapon type before battle." % [
 		int(DrawCanvas.WEAPON_MAX_SIZE), maxi(n, 0)]
+# ---------- Save ----------
 
 func _save() -> void:
+	var raw: Array = canvas.weapon_strokes()
+	var mn := Vector2(1000000.0, 1000000.0)
+	var mx := Vector2(-1000000.0, -1000000.0)
+	for s in raw:
+		for p in s:
+			mn = mn.min(p)
+			mx = mx.max(p)
+	var wcenter := (mn + mx) * 0.5
 	var wstrokes: Array = []
-	for s in canvas.weapon_strokes():
-		wstrokes.append(ShapeUtils.offset_points(s, -body_data["center"]))
+	for s in raw:
+		wstrokes.append(ShapeUtils.offset_points(s, -wcenter))
 	var weapon := {}
 	if not wstrokes.is_empty():
 		weapon = {"type": WeaponDefs.Type.NONE, "strokes": wstrokes}
 
-	var color: Color = COLORS[GameData.tops.size() % COLORS.size()]
 	var tname := name_edit.text.strip_edges()
-	if tname.is_empty():
-		tname = "Top %d" % (GameData.tops.size() + 1)
-	var ok := GameData.add_top(body_data["area"], color, body_data["strokes_local"], weapon, tname)
-	if ok:
-		name_edit.clear()
-		canvas.clear_drawing()
-		_set_stage(Stage.BODY)
-		status.text = "Saved! You have %d / %d tops.\nDraw another or go to Menu." % [
-			GameData.tops.size(), GameData.MAX_TOPS]
+	if edit_index >= 0:
+		if tname.is_empty():
+			tname = "Top %d" % (edit_index + 1)
+		GameData.update_top(edit_index, body_data["area"], body_data["strokes_local"], weapon, tname)
 	else:
-		status.text = "Top storage is full (%d). Delete one in the Battle screen." % GameData.MAX_TOPS
+		if tname.is_empty():
+			tname = "Top %d" % (GameData.tops.size() + 1)
+		var color: Color = COLORS[GameData.tops.size() % COLORS.size()]
+		var ok := GameData.add_top(body_data["area"], color, body_data["strokes_local"], weapon, tname)
+		if not ok:
+			status.text = "Storage is full (%d). Delete a top in Storage first." % GameData.MAX_TOPS
+			return
+	_to_storage()

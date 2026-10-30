@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://bq4k4vbuiaucu"]
+
+[ext_resource type="Script" uid="uid://cu6q4xlxjao46" path="res://storage.gd" id="1_tqcej"]
+
+[node name="Storage" type="Control" unique_id=1856250963]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("1_tqcej")

@@ -1,52 +1,59 @@
 extends Node2D
 
-enum State { SELECT, ARCHETYPE, AIM, FIGHT, OVER }
+enum State { SELECT, ARCHETYPE, AIM, COUNTDOWN, FIGHT, OVER }
 
 const BATTLE_SCALE := 0.14
 const ARENA_CENTER := Vector2(640, 360)
 const AIM_MAX_DIST := 220.0
 const AIM_MIN_POWER := 0.15
 const MATCH_TIME := 90.0
-const ARCH_NAMES := ["Attack", "Speed", "Defense"]
+const COUNT_STEP := 0.8
 const ULT_NAMES := ["Overdrive Impact", "Mach Drive", "Black Hole"]
+const SKILL_LABELS := ["ATTACK", "SPEED", "DEFENSE"]
 
 var state := State.SELECT
 var player: Top
 var enemy: Top
 var aiming := false
 var chosen_index := -1
+var chosen_weapon := 0
 var last_arch := 0
 var match_time := MATCH_TIME
+var match_id := 0
 var enemy_ult_delay := 1.0
-var weapon_holder: CenterContainer
-var chosen_weapon := 0
+var enemy_skill_delay := 2.0
+var shake := 0.0
 
+var arena: Arena
+var camera: Camera2D
 var tops_node: Node2D
 var aim_line: Line2D
 var select_holder: CenterContainer
 var arch_holder: CenterContainer
-var list_box: VBoxContainer
+var weapon_holder: CenterContainer
+var grid: GridContainer
+var info_box: PanelContainer
 var info: Label
 var rematch_btn: Button
+var again_btn: Button
 var ult_btn: Button
+var skill_btns: Array[Button] = []
 var player_bar: ProgressBar
 var enemy_bar: ProgressBar
 var player_label: Label
 var enemy_label: Label
 var timer_label: Label
-var arena: Arena
-var preview: TopPreview
-var preview_name: Label
-var preview_stats: Label
-var choose_btn: Button
-var selected_index := 0
 
 func _ready() -> void:
-	RenderingServer.set_default_clear_color(Color("14161c"))
+	RenderingServer.set_default_clear_color(Color("07070f"))
 
 	arena = Arena.new()
 	arena.position = ARENA_CENTER
 	add_child(arena)
+
+	camera = Camera2D.new()
+	camera.position = Vector2(640, 360)
+	add_child(camera)
 
 	tops_node = Node2D.new()
 	add_child(tops_node)
@@ -63,7 +70,11 @@ func _ready() -> void:
 	_show_select()
 
 func _process(delta: float) -> void:
-	if state == State.AIM:
+	info_box.visible = info.text != ""
+	shake = maxf(shake - delta * 30.0, 0.0)
+	camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).round() * shake
+
+	if state == State.AIM or state == State.COUNTDOWN:
 		for t in [player, enemy]:
 			if t:
 				t.rotation += Top.PREVIEW_SPIN * delta
@@ -71,7 +82,9 @@ func _process(delta: float) -> void:
 		match_time -= delta
 		timer_label.text = str(ceili(maxf(match_time, 0.0)))
 		_update_ult_ui()
+		_update_skill_ui()
 		_enemy_ult(delta)
+		_enemy_skills(delta)
 		arena.update_fight(delta, [player, enemy], MATCH_TIME - match_time)
 		if match_time <= 0.0:
 			_time_up()
@@ -94,31 +107,25 @@ func _make_label(root: Control, pos: Vector2) -> Label:
 	var l := Label.new()
 	l.position = pos
 	l.add_theme_font_size_override("font_size", 22)
+	UiStyle.outline(l, 4)
 	l.visible = false
 	root.add_child(l)
 	return l
 
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
-	layer.layer = 2
 	add_child(layer)
 	var root := Control.new()
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(root)
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	var bar := HBoxContainer.new()
-	bar.position = Vector2(16, 16)
-	bar.add_theme_constant_override("separation", 12)
-	root.add_child(bar)
-	var menu_btn := UiStyle.make_button("Menu", Color("5a5f6b"), 64, 24)
+	# Menu button (top left)
+	var menu_btn := UiStyle.make_button("Menu", UiStyle.LAVENDER, 64, 24)
 	menu_btn.custom_minimum_size.x = 150
+	menu_btn.position = Vector2(16, 16)
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://menu.tscn"))
-	bar.add_child(menu_btn)
-	var change_btn := UiStyle.make_button("Change top", Color("4a6fa5"), 64, 24)
-	change_btn.custom_minimum_size.x = 210
-	change_btn.pressed.connect(_show_select)
-	bar.add_child(change_btn)
+	root.add_child(menu_btn)
 
 	# Match timer (top center)
 	timer_label = Label.new()
@@ -126,126 +133,101 @@ func _build_ui() -> void:
 	timer_label.size = Vector2(200, 60)
 	timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	timer_label.add_theme_font_size_override("font_size", 48)
+	timer_label.add_theme_color_override("font_color", UiStyle.YELLOW)
+	UiStyle.outline(timer_label, 8)
 	timer_label.visible = false
 	root.add_child(timer_label)
 
-	# HP bars (left = you, right = enemy)
-	player_bar = _make_bar(root, Vector2(16, 96), Color("2fbf71"))
+	# HP bars
+	player_bar = _make_bar(root, Vector2(16, 96), UiStyle.GREEN)
 	player_label = _make_label(root, Vector2(16, 126))
-	enemy_bar = _make_bar(root, Vector2(884, 96), Color("c94f5a"))
+	enemy_bar = _make_bar(root, Vector2(884, 96), UiStyle.RED)
 	enemy_label = _make_label(root, Vector2(884, 126))
 
+	# Info text inside a dialogue box
+	info_box = PanelContainer.new()
+	info_box.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.WHITE, UiStyle.BLACK, 12))
+	info_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	info_box.position = Vector2(140, 626)
+	info_box.custom_minimum_size.x = 1000
+	info_box.size = Vector2(1000, 0)
+	info_box.visible = false
+	root.add_child(info_box)
 	info = Label.new()
-	info.position = Vector2(0, 668)
-	info.size = Vector2(1280, 40)
 	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	info.add_theme_font_size_override("font_size", 26)
-	root.add_child(info)
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_theme_font_size_override("font_size", 24)
+	info.add_theme_color_override("font_color", UiStyle.YELLOW)
+	info_box.add_child(info)
 
-	# Ultimate button (bottom center)
-	ult_btn = UiStyle.make_button("ULTIMATE", Color("9b5de5"), 76, 26)
+	# Ultimate button
+	ult_btn = UiStyle.make_button("ULTIMATE", UiStyle.PINK, 76, 26)
 	ult_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ult_btn.custom_minimum_size.x = 340
-	ult_btn.position = Vector2(470, 580)
+	ult_btn.position = Vector2(470, 530)
 	ult_btn.visible = false
-	ult_btn.pressed.connect(func():
-		if player and player.ult_ready():
-			player.activate_ultimate()
-			info.text = ULT_NAMES[player.archetype].to_upper() + "!")
+	ult_btn.pressed.connect(_on_ult_pressed)
 	root.add_child(ult_btn)
 
-	rematch_btn = UiStyle.make_button("REMATCH", Color("2fbf71"), 70, 28)
+	# Skill buttons (left edge)
+	var sk_cols := [UiStyle.RED, UiStyle.YELLOW, UiStyle.BLUE]
+	for i in 3:
+		var sb := UiStyle.make_button(SKILL_LABELS[i], sk_cols[i], 84, 24)
+		sb.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		sb.custom_minimum_size.x = 220
+		sb.position = Vector2(16, 230 + i * 96)
+		sb.visible = false
+		sb.pressed.connect(_on_skill_pressed.bind(i))
+		root.add_child(sb)
+		skill_btns.append(sb)
+
+	# Result buttons
+	rematch_btn = UiStyle.make_button("REMATCH", UiStyle.GREEN, 70, 28)
 	rematch_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	rematch_btn.custom_minimum_size.x = 220
-	rematch_btn.position = Vector2(530, 590)
+	rematch_btn.custom_minimum_size.x = 240
+	rematch_btn.position = Vector2(390, 530)
 	rematch_btn.visible = false
 	rematch_btn.pressed.connect(func(): _start_match(last_arch))
 	root.add_child(rematch_btn)
 
-	# --- Top selection panel ---
-	# --- Top selection panel ---
+	again_btn = UiStyle.make_button("PICK ANOTHER", UiStyle.BLUE, 70, 28)
+	again_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	again_btn.custom_minimum_size.x = 280
+	again_btn.position = Vector2(650, 530)
+	again_btn.visible = false
+	again_btn.pressed.connect(_show_select)
+	root.add_child(again_btn)
+
+	# --- Top selection: grid of boxes ---
 	select_holder = CenterContainer.new()
 	select_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(select_holder)
 	select_holder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	select_holder.offset_top = 80
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size.x = 960
 	panel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.BLUE))
 	select_holder.add_child(panel)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 24)
-	panel.add_child(h)
-
 	var v := VBoxContainer.new()
-	v.custom_minimum_size.x = 500
-	v.add_theme_constant_override("separation", 8)
-	h.add_child(v)
+	v.add_theme_constant_override("separation", 10)
+	panel.add_child(v)
 	var title := Label.new()
 	title.text = "Choose your top"
 	title.add_theme_font_size_override("font_size", 34)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UiStyle.outline(title, 5)
 	v.add_child(title)
-	list_box = VBoxContainer.new()
-	list_box.add_theme_constant_override("separation", 6)
-	v.add_child(list_box)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(1010, 510)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	v.add_child(scroll)
+	grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 12)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(grid)
 
-	var pv := VBoxContainer.new()
-	pv.custom_minimum_size.x = 380
-	pv.add_theme_constant_override("separation", 10)
-	h.add_child(pv)
-	preview = TopPreview.new()
-	preview.custom_minimum_size = Vector2(380, 300)
-	pv.add_child(preview)
-	preview_name = Label.new()
-	preview_name.add_theme_font_size_override("font_size", 30)
-	preview_name.add_theme_color_override("font_color", UiStyle.YELLOW)
-	preview_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiStyle.outline(preview_name, 5)
-	pv.add_child(preview_name)
-	preview_stats = Label.new()
-	preview_stats.add_theme_font_size_override("font_size", 22)
-	preview_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiStyle.outline(preview_stats, 4)
-	pv.add_child(preview_stats)
-	choose_btn = UiStyle.make_button("CHOOSE", UiStyle.GREEN.darkened(0.15), 70, 28)
-	choose_btn.pressed.connect(func():
-		if selected_index >= 0 and selected_index < GameData.tops.size():
-			_choose_weapon(selected_index))
-	pv.add_child(choose_btn)
-
-	# --- Archetype panel ---
-	arch_holder = CenterContainer.new()
-	arch_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(arch_holder)
-	arch_holder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var apanel := PanelContainer.new()
-	apanel.custom_minimum_size.x = 700
-	apanel.add_theme_stylebox_override("panel", UiStyle.box(Color("1f2229"), 20, 24))
-	arch_holder.add_child(apanel)
-	var av := VBoxContainer.new()
-	av.add_theme_constant_override("separation", 12)
-	apanel.add_child(av)
-	var atitle := Label.new()
-	atitle.text = "Choose movement style"
-	atitle.add_theme_font_size_override("font_size", 34)
-	atitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	av.add_child(atitle)
-
-	var defs := [
-		["ATTACK: heavy hits | Ult: Overdrive Impact", Color("c94f5a"), Top.Archetype.ATTACK],
-		["SPEED: erratic ricochets | Ult: Mach Drive", Color("d9a82f"), Top.Archetype.SPEED],
-		["DEFENSE: center anchor | Ult: Black Hole", Color("4a6fa5"), Top.Archetype.DEFENSE],
-	]
-	for d in defs:
-		var b := UiStyle.make_button(d[0], d[1], 76, 24)
-		b.pressed.connect(_start_match.bind(d[2]))
-		av.add_child(b)
-	var back := UiStyle.make_button("Back", Color("5a5f6b"), 60, 24)
-	back.pressed.connect(_show_select)
-	av.add_child(back)
-	
-		# --- Weapon type panel ---
+	# --- Weapon type panel ---
 	weapon_holder = CenterContainer.new()
 	weapon_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(weapon_holder)
@@ -275,52 +257,96 @@ func _build_ui() -> void:
 	wback.pressed.connect(_show_select)
 	wv.add_child(wback)
 
-func _top_name(i: int) -> String:
-	var n: String = GameData.tops[i].get("name", "")
-	return n if n != "" else "Top %d" % (i + 1)
+	# --- Ultimate panel ---
+	arch_holder = CenterContainer.new()
+	arch_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(arch_holder)
+	arch_holder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var apanel := PanelContainer.new()
+	apanel.custom_minimum_size.x = 700
+	apanel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.PINK))
+	arch_holder.add_child(apanel)
+	var av := VBoxContainer.new()
+	av.add_theme_constant_override("separation", 12)
+	apanel.add_child(av)
+	var atitle := Label.new()
+	atitle.text = "Choose ultimate"
+	atitle.add_theme_font_size_override("font_size", 34)
+	atitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	UiStyle.outline(atitle, 5)
+	av.add_child(atitle)
+	var defs := [
+		["OVERDRIVE IMPACT  (ultimate)", UiStyle.RED, Top.Archetype.ATTACK],
+		["MACH DRIVE  (ultimate)", UiStyle.YELLOW, Top.Archetype.SPEED],
+		["BLACK HOLE  (ultimate)", UiStyle.BLUE, Top.Archetype.DEFENSE],
+	]
+	for d in defs:
+		var b := UiStyle.make_button(d[0], d[1], 76, 24)
+		b.pressed.connect(_start_match.bind(d[2]))
+		av.add_child(b)
+	var back := UiStyle.make_button("Back", UiStyle.LAVENDER, 60, 24)
+	back.pressed.connect(_show_select)
+	av.add_child(back)
 
-func _refresh_list() -> void:
-	for c in list_box.get_children():
+func _refresh_grid() -> void:
+	for c in grid.get_children():
+		grid.remove_child(c)
 		c.queue_free()
 	if GameData.tops.is_empty():
+		grid.columns = 1
 		var l := Label.new()
-		l.text = "No saved tops. Go to Menu and draw one."
+		l.text = "No saved tops yet.\nGo to Menu > DRAW to create one."
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		list_box.add_child(l)
-		preview.data = {}
-		preview_name.text = ""
-		preview_stats.text = ""
-		choose_btn.disabled = true
+		l.custom_minimum_size.x = 700
+		grid.add_child(l)
 		return
-	choose_btn.disabled = false
+	grid.columns = 4
 	for i in GameData.tops.size():
-		var data: Dictionary = GameData.tops[i]
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
-		var pick := UiStyle.make_button(_top_name(i), data["color"].darkened(0.3), 52, 24)
-		pick.pressed.connect(_select_top.bind(i))
-		row.add_child(pick)
-		var del := UiStyle.make_button("X", UiStyle.RED, 52, 24)
-		del.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		del.custom_minimum_size.x = 64
-		del.pressed.connect(_delete_top.bind(i))
-		row.add_child(del)
-		list_box.add_child(row)
-	_select_top(clampi(selected_index, 0, GameData.tops.size() - 1))
+		grid.add_child(_make_card(i))
 
-func _select_top(i: int) -> void:
-	selected_index = i
+func _make_card(i: int) -> PanelContainer:
 	var data: Dictionary = GameData.tops[i]
 	var st := TopStats.from_area(data["area"])
-	preview.data = data
-	preview_name.text = _top_name(i)
-	preview_stats.text = "HP %d   |   %d RPM\n%s" % [
-		st.max_hp, st.rpm(),
-		"Weapon shape drawn" if not data.get("weapon", {}).is_empty() else "No weapon shape"]
+	var wdata: Dictionary = data.get("weapon", {})
+	var has_weapon: bool = not wdata.is_empty()
 
-func _delete_top(i: int) -> void:
-	GameData.remove_top(i)
-	_refresh_list()
+	var card := PanelContainer.new()
+	card.custom_minimum_size.x = 236
+	card.add_theme_stylebox_override("panel", UiStyle.panel(data["color"], UiStyle.INK, 10))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	card.add_child(v)
+
+	var pv := TopPreview.new()
+	pv.custom_minimum_size = Vector2(0, 110)
+	pv.data = data
+	v.add_child(pv)
+
+	var n := Label.new()
+	var nm: String = data.get("name", "")
+	n.text = nm if nm != "" else "Top %d" % (i + 1)
+	n.clip_text = true
+	n.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	n.add_theme_font_size_override("font_size", 22)
+	n.add_theme_color_override("font_color", UiStyle.YELLOW)
+	UiStyle.outline(n, 4)
+	var name_box := PanelContainer.new()
+	var nsb := UiStyle.panel(UiStyle.YELLOW, UiStyle.BLACK, 6)
+	nsb.set_border_width_all(3)
+	name_box.add_theme_stylebox_override("panel", nsb)
+	name_box.add_child(n)
+	v.add_child(name_box)
+
+	var s := Label.new()
+	s.text = "HP %d | %d RPM%s" % [st.max_hp, st.rpm(), " | W" if has_weapon else ""]
+	s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	s.add_theme_font_size_override("font_size", 18)
+	v.add_child(s)
+
+	var pick := UiStyle.make_button("CHOOSE", UiStyle.GREEN, 44, 20)
+	pick.pressed.connect(_choose_weapon.bind(i))
+	v.add_child(pick)
+	return card
 
 # ---------- Match flow ----------
 
@@ -328,33 +354,35 @@ func _set_bars_visible(v: bool) -> void:
 	for n in [player_bar, enemy_bar, player_label, enemy_label, timer_label]:
 		n.visible = v
 
+func _set_skills_visible(v: bool) -> void:
+	for b in skill_btns:
+		b.visible = v
+
 func _show_select() -> void:
+	match_id += 1
 	_clear_tops()
-	weapon_holder.visible = false
+	arena.reset()
 	state = State.SELECT
 	aim_line.visible = false
 	aiming = false
 	select_holder.visible = true
 	arch_holder.visible = false
+	weapon_holder.visible = false
 	rematch_btn.visible = false
+	again_btn.visible = false
 	ult_btn.visible = false
+	_set_skills_visible(false)
 	_set_bars_visible(false)
 	info.text = ""
-	_refresh_list()
+	_refresh_grid()
 
-func _choose_archetype(index: int) -> void:
-	chosen_index = index
-	state = State.ARCHETYPE
-	select_holder.visible = false
-	arch_holder.visible = true
-	
 func _choose_weapon(index: int) -> void:
 	chosen_index = index
 	var w: Dictionary = GameData.tops[index].get("weapon", {})
 	select_holder.visible = false
 	if w.is_empty():
-		chosen_weapon = WeaponDefs.Type.NONE   # nothing drawn, skip this step
-		_choose_archetype(index)
+		chosen_weapon = WeaponDefs.Type.NONE   # no weapon shape drawn: skip this step
+		_choose_archetype()
 	else:
 		state = State.ARCHETYPE
 		weapon_holder.visible = true
@@ -362,7 +390,12 @@ func _choose_weapon(index: int) -> void:
 func _pick_weapon(type: int) -> void:
 	chosen_weapon = type
 	weapon_holder.visible = false
-	_choose_archetype(chosen_index)
+	_choose_archetype()
+
+func _choose_archetype() -> void:
+	state = State.ARCHETYPE
+	select_holder.visible = false
+	arch_holder.visible = true
 
 func _clear_tops() -> void:
 	for t in tops_node.get_children():   # also removes bullets
@@ -398,6 +431,7 @@ func _make_top(index: int, offset: Vector2, wtype: int) -> Top:
 	top.position = ARENA_CENTER + offset
 	tops_node.add_child(top)
 	top.died.connect(_on_died.bind(top))
+	top.damaged.connect(func(a: int): shake = maxf(shake, clampf(a * 0.6, 2.0, 12.0)))
 	return top
 
 func _bind_bar(top: Top, bar: ProgressBar, label: Label, who: String) -> void:
@@ -411,8 +445,9 @@ func _on_hp_changed(hp: int, max_hp: int, bar: ProgressBar, label: Label, who: S
 	label.text = "%s   %d / %d" % [who, hp, max_hp]
 
 func _start_match(player_arch: int) -> void:
-	arena.reset()
+	match_id += 1
 	_clear_tops()
+	arena.reset()
 	last_arch = player_arch
 	var enemy_index := chosen_index
 	if GameData.tops.size() > 1:
@@ -432,14 +467,42 @@ func _start_match(player_arch: int) -> void:
 	_bind_bar(enemy, enemy_bar, enemy_label, "ENEMY")
 
 	rematch_btn.visible = false
+	again_btn.visible = false
 	ult_btn.visible = false
+	_set_skills_visible(false)
 	arch_holder.visible = false
+	weapon_holder.visible = false
 	state = State.AIM
-	info.text = "You: %s (%s)   vs   Enemy: %s (%s)   |   Drag to aim, release to launch" % [
-		ARCH_NAMES[player_arch], WeaponDefs.NAMES[player.weapon_type],
-		ARCH_NAMES[enemy_arch], WeaponDefs.NAMES[enemy.weapon_type]]
+	info.text = "You: %s (%s)  vs  Enemy: %s (%s)  |  Drag to aim, release to launch" % [
+		ULT_NAMES[player_arch], WeaponDefs.NAMES[player.weapon_type],
+		ULT_NAMES[enemy_arch], WeaponDefs.NAMES[enemy.weapon_type]]
 
-# ---------- Ultimates ----------
+# ---------- Skills and ultimates ----------
+
+func _on_skill_pressed(i: int) -> void:
+	if player and player.skill_ready(i):
+		player.activate_skill(i)
+		shake = 8.0
+
+func _on_ult_pressed() -> void:
+	if player and player.ult_ready():
+		player.activate_ultimate()
+		_ult_fx(player, true)
+
+func _update_skill_ui() -> void:
+	if player == null:
+		return
+	for i in 3:
+		var b := skill_btns[i]
+		if player.skill_time[i] > 0.0:
+			b.disabled = false
+			b.text = "%s  %.1fs" % [SKILL_LABELS[i], player.skill_time[i]]
+		elif player.skill_cd[i] > 0.0:
+			b.disabled = true
+			b.text = "%s  wait %d" % [SKILL_LABELS[i], ceili(player.skill_cd[i])]
+		else:
+			b.disabled = false
+			b.text = SKILL_LABELS[i]
 
 func _update_ult_ui() -> void:
 	if player == null:
@@ -462,14 +525,36 @@ func _enemy_ult(delta: float) -> void:
 		enemy_ult_delay -= delta
 		if enemy_ult_delay <= 0.0:
 			enemy.activate_ultimate()
+			_ult_fx(enemy, false)
 			enemy_ult_delay = randf_range(0.5, 2.0)
+
+func _enemy_skills(delta: float) -> void:
+	if enemy == null or enemy.dead:
+		return
+	enemy_skill_delay -= delta
+	if enemy_skill_delay > 0.0:
+		return
+	enemy_skill_delay = randf_range(2.0, 4.0)
+	var options: Array[int] = []
+	for i in 3:
+		if enemy.skill_ready(i):
+			options.append(i)
+	if not options.is_empty():
+		enemy.activate_skill(options.pick_random())
+
+func _ult_fx(top: Top, mine: bool) -> void:
+	var col := UiStyle.YELLOW if mine else UiStyle.RED
+	Fx.flash(self, col)
+	Fx.banner(self, ("" if mine else "ENEMY: ") + ULT_NAMES[top.archetype].to_upper() + "!", col)
+	Fx.burst(tops_node, top.global_position, col, 16, 90.0)
+	shake = 14.0
 
 # ---------- Ending ----------
 
 func _finish(message: String, loser: Top = null) -> void:
-	arena.reset()
 	if state != State.FIGHT:
 		return
+	arena.reset()
 	state = State.OVER
 	for t in [player, enemy]:
 		if t:
@@ -480,8 +565,13 @@ func _finish(message: String, loser: Top = null) -> void:
 	for b in get_tree().get_nodes_in_group("bullets"):
 		b.queue_free()
 	ult_btn.visible = false
+	_set_skills_visible(false)
 	info.text = message
+	Fx.banner(self, message, UiStyle.YELLOW)
+	if loser:
+		Fx.burst(tops_node, loser.global_position, Color.WHITE, 22, 130.0)
 	rematch_btn.visible = true
+	again_btn.visible = true
 
 func _on_died(loser: Top) -> void:
 	_finish("YOU WIN!" if loser == enemy else "YOU LOSE", loser)
@@ -518,8 +608,10 @@ func _update_aim() -> void:
 	var v := _aim_vector()
 	var power := v.length() / AIM_MAX_DIST
 	aim_line.points = PackedVector2Array([player.global_position, player.global_position + v])
-	aim_line.default_color = Color("2fbf71").lerp(Color("ff5d73"), power)
+	aim_line.default_color = UiStyle.GREEN.lerp(UiStyle.RED, power)
 	aim_line.visible = true
+
+# ---------- Countdown and launch ----------
 
 func _launch() -> void:
 	var v := _aim_vector()
@@ -527,11 +619,54 @@ func _launch() -> void:
 	aim_line.visible = false
 	if power < AIM_MIN_POWER:
 		return
+	state = State.COUNTDOWN
+	info.text = ""
+	_countdown(v.normalized(), power)
+
+func _countdown(dir: Vector2, power: float) -> void:
+	var id := match_id
+	for n in [3, 2, 1]:
+		_pop(str(n), UiStyle.YELLOW, 120)
+		await get_tree().create_timer(COUNT_STEP).timeout
+		if id != match_id:
+			return
+	_pop("FIGHT!", UiStyle.RED, 110)
+	Fx.flash(self, UiStyle.RED)
+	shake = 10.0
+
 	var to_player := player.global_position - enemy.global_position
-	player.launch(v.normalized(), power)
+	player.launch(dir, power)
 	enemy.launch(to_player.normalized().rotated(randf_range(-0.4, 0.4)), 0.8)
 	match_time = MATCH_TIME
 	enemy_ult_delay = randf_range(0.5, 2.0)
+	enemy_skill_delay = randf_range(2.0, 4.0)
 	state = State.FIGHT
 	ult_btn.visible = true
-	info.text = "Fight!"
+	_set_skills_visible(true)
+
+func _pop(text: String, color: Color, font_size: int) -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 3
+	var l := Label.new()
+	l.text = text
+	l.size = Vector2(1280, 200)
+	l.position = Vector2(0, 220)
+	l.pivot_offset = Vector2(640, 100)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", font_size)
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_color_override("font_outline_color", Color.BLACK)
+	l.add_theme_constant_override("outline_size", 16)
+	l.scale = Vector2(2.2, 2.2)
+	l.modulate.a = 0.0
+	layer.add_child(l)
+	add_child(layer)
+	var tw := l.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(l, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(l, "modulate:a", 1.0, 0.1)
+	tw.chain().tween_interval(0.35)
+	tw.chain().tween_property(l, "modulate:a", 0.0, 0.2)
+	tw.chain().tween_callback(layer.queue_free)

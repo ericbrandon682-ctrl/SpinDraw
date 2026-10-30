@@ -3,8 +3,10 @@ extends Node
 const SAVE_PATH := "user://tops.json"
 const MAX_TOPS := 8
 
-## Entry: {"area", "color", "strokes", "weapon": {} or {"type": int, "strokes": Array}}
+## Entry: {"area", "color", "strokes", "weapon", "name"}
 var tops: Array = []
+## Which top the Draw scene is editing (-1 = creating a new one).
+var editing_index := -1
 
 func _ready() -> void:
 	load_tops()
@@ -16,6 +18,15 @@ func add_top(area: float, color: Color, strokes: Array, weapon: Dictionary = {},
 			"weapon": weapon.duplicate(), "name": p_name})
 	save_tops()
 	return true
+
+func update_top(index: int, area: float, strokes: Array, weapon: Dictionary, p_name: String) -> void:
+	if index < 0 or index >= tops.size():
+		return
+	tops[index]["area"] = area
+	tops[index]["strokes"] = strokes.duplicate()
+	tops[index]["weapon"] = weapon.duplicate()
+	tops[index]["name"] = p_name
+	save_tops()
 
 func remove_top(index: int) -> void:
 	if index >= 0 and index < tops.size():
