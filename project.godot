@@ -18,7 +18,6 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameData="*uid://bqn7mioum7nlc"
-Retro="*uid://0lrl2fbopfq5"
 
 [display]
 
@@ -26,6 +25,10 @@ window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/handheld/orientation=4
+
+[gui]
+
+theme/custom_font="uid://ctsw3rkwgq01k"
 
 [physics]
 

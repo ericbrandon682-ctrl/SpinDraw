@@ -3,66 +3,78 @@ extends RigidBody2D
 
 signal hp_changed(hp: int, max_hp: int)
 signal died
+signal damaged(amount: int)
 
-enum Archetype { ATTACK, SPEED, DEFENSE }
+enum Archetype { ATTACK, SPEED, DEFENSE }   # which ULTIMATE this top has
+enum Skill { ATTACK, SPEED, DEFENSE }       # button-activated skills
 
+# ---------- Skills ----------
+const BASE_SPEED := 0.5            # launch speed multiplier (lower = calmer)
+const MIN_DRIFT := 0.18            # tops never drop below this fraction of max speed
+const SKILL_NAMES := ["CHARGE", "SPEED UP", "SHIELD"]
+const SKILL_TIME := [2.0, 3.0, 3.5]
+const SKILL_COOLDOWN := [8.0, 7.0, 10.0]
+const SKILL_COLORS := [Color("ff4d4d"), Color("ffd23f"), Color("4db8ff")]
+const CHARGE_DAMAGE := 1.8
+const DEFENSE_DAMAGE_TAKEN := 0.4
+
+# ---------- Shapes ----------
 const LINE_WIDTH := 3.0
 const HALF_THICKNESS := 2.0
 const SIMPLIFY_TOLERANCE := 1.0
 const MAX_SEGMENTS := 100
 const MAX_BLADE_SEGMENTS := 24
 const THREE_PROJ_DAMAGE := 0.5     # each bullet of "3 Projectiles" deals this fraction
-const ATTACK_MIN_SPEED := 0.5   # fraction of max_speed Attack never drops below
 
-#Ultimates
+# ---------- Ultimates ----------
 const ULT_PASSIVE := 0.015
-const ULT_DAMAGE_GAIN := 1.0    # charge gained = damage / max_hp * this
+const ULT_DAMAGE_GAIN := 1.0       # charge gained = damage / max_hp * this
 const OVERDRIVE_TIME := 3.0
 const MACH_TIME := 5.0
 const BLACKHOLE_TIME := 5.0
 const BLACKHOLE_RADIUS := 260.0
-const OVERDRIVE_HIT_PERCENT := 0.12   # of enemy max HP per hit
-const BLACKHOLE_TICK_PERCENT := 0.03  # of enemy max HP per 0.5 s
-const MACH_DAMAGE_TAKEN := 0.1        # 90% reduction
+const OVERDRIVE_HIT_PERCENT := 0.12    # of enemy max HP per hit
+const BLACKHOLE_TICK_PERCENT := 0.03   # of enemy max HP per 0.5 s
+const MACH_DAMAGE_TAKEN := 0.1         # 90% reduction
 const OVERDRIVE_VOLLEYS := 3
 const OVERDRIVE_VOLLEY_GAP := 0.7
 
-# Attack knockback
+# ---------- Knockback ----------
 const KNOCKBACK := 0.9
 const KNOCKBACK_COOLDOWN := 0.4
 
-# Spin
+# ---------- Spin ----------
 const PREVIEW_SPIN := 3.0
 const SPIN_DECAY := 0.0
 const SPIN_HIT_LOSS := 0.0
 const MIN_SPIN_RATIO := 0.5
 const SPIN_RECOVERY := 4.0
 
-# Stuck detection
+# ---------- Stuck detection ----------
 const STUCK_TIME := 1.0
 const STUCK_SPEED := 25.0
 
-# Damage tuning
-const BODY_DAMAGE := 0.001         # relative speed * mass * this
-const BODY_HIT_COOLDOWN := 0.6        # was 0.3
-const BLADE_DAMAGE := 3               # was 5
-const BLADE_COOLDOWN := 0.5           # was 0.35
-const THREE_BLADE_COOLDOWN := 0.4     # was 0.22
-const HEAVY_COOLDOWN := 0.8           # was 0.5
+# ---------- Damage tuning ----------
+const BODY_DAMAGE := 0.001             # try 0.004 if collisions should matter more
+const BODY_HIT_COOLDOWN := 0.6
+const BLADE_DAMAGE := 3
+const BLADE_COOLDOWN := 0.5
+const THREE_BLADE_COOLDOWN := 0.4
+const HEAVY_COOLDOWN := 0.8
 const MAX_BULLETS := 12
-const SIZE_DAMAGE_MIN := 2.2   # tiniest top
-const SIZE_DAMAGE_MAX := 0.5   # biggest top
-const PROJ_DAMAGE_SMALL := 1.5   # tiniest top's bullets
-const PROJ_DAMAGE_BIG := 0.9     # biggest top's bullets
-const PROJ_RATE_SMALL := 0.85    # fire interval multiplier, tiniest top
-const PROJ_RATE_BIG := 1.1       # fire interval multiplier, biggest top
+const SIZE_DAMAGE_MIN := 2.2           # tiniest top: melee damage multiplier
+const SIZE_DAMAGE_MAX := 0.5           # biggest top
+const PROJ_DAMAGE_SMALL := 1.5         # tiniest top's bullets
+const PROJ_DAMAGE_BIG := 0.9           # biggest top's bullets
+const PROJ_RATE_SMALL := 0.85          # fire interval multiplier, tiniest top
+const PROJ_RATE_BIG := 1.1             # fire interval multiplier, biggest top
 
-# Status tuning
+# ---------- Status tuning ----------
 const SLOW_TIME := 2.5
 const SLOW_SPEED := 0.5
 const SLOW_SPIN := 0.6
 const BURN_TIME := 4.0
-const BURN_DAMAGE := 4                # per second
+const BURN_DAMAGE := 4                 # per second
 
 var stats: TopStats
 var hp: int
@@ -75,7 +87,6 @@ var ai_active := false
 
 var spin_ratio := 1.0
 var body_radius := 10.0
-var _impulse_timer := 0.0
 var _kb_cd := 0.0
 var _body_cd := 0.0
 var _stuck_time := 0.0
@@ -98,15 +109,21 @@ var burn_time := 0.0
 var _burn_tick := 0.0
 var burn_dps := BURN_DAMAGE
 
-# Ultimate effects
+# Ultimate
 var ult_charge := 0.0
 var ult_used := false
-var _burst_left := 0
-var _burst_timer := 0.0
 var ult_time := 0.0
 var speed_boost := 1.0
+var _burst_left := 0
+var _burst_timer := 0.0
 var _ult_fx: Node2D = null
 var _bh_tick := 0.0
+
+# Skills
+var skill_time: Array[float] = [0.0, 0.0, 0.0]
+var skill_cd: Array[float] = [0.0, 0.0, 0.0]
+var _skill_fx := {}
+var _trail_timer := 0.0
 
 ## Call BEFORE add_child. Points are centroid-relative and already battle-scaled.
 ## weapon = {} or {"type": int, "strokes": Array} (also centroid-relative, scaled).
@@ -151,15 +168,6 @@ func set_archetype(a: Archetype, p_target: Top, center: Vector2) -> void:
 	archetype = a
 	target = p_target
 	arena_center = center
-	match a:
-		Archetype.ATTACK:
-			mass *= 1.5
-			linear_damp = 0.15
-		Archetype.SPEED:
-			linear_damp = 0.2
-		Archetype.DEFENSE:
-			mass *= 1.5
-			linear_damp = 2.0
 
 # ---------- Building shapes ----------
 
@@ -187,13 +195,21 @@ func _add_capsules(parent: Node, stroke: PackedVector2Array, count: int,
 	return count
 
 func _add_stroke_visual(stroke: PackedVector2Array, color: Color, width: float) -> void:
+	var shadow := Line2D.new()
+	shadow.points = stroke
+	shadow.width = width + 3.0
+	shadow.default_color = Color("07070f")
+	shadow.joint_mode = Line2D.LINE_JOINT_SHARP
+	shadow.begin_cap_mode = Line2D.LINE_CAP_BOX
+	shadow.end_cap_mode = Line2D.LINE_CAP_BOX
+	add_child(shadow)
 	var line := Line2D.new()
 	line.points = stroke
 	line.width = width
 	line.default_color = color
 	line.joint_mode = Line2D.LINE_JOINT_ROUND
-	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
-	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.begin_cap_mode = Line2D.LINE_CAP_BOX
+	line.end_cap_mode = Line2D.LINE_CAP_BOX
 	line.antialiased = false
 	add_child(line)
 
@@ -210,6 +226,15 @@ func _setup_weapon(weapon: Dictionary, color: Color) -> void:
 		_build_projectile(wstrokes)
 
 func _build_melee(wstrokes: Array) -> void:
+	var min_x := 1000000.0
+	for s in wstrokes:
+		for p in s:
+			min_x = minf(min_x, p.x)
+	var shift := Vector2(body_radius * 0.8 - min_x, 0.0)
+	var placed: Array = []
+	for s in wstrokes:
+		placed.append(ShapeUtils.offset_points(s, shift))
+	wstrokes = placed
 	hitbox = Area2D.new()
 	hitbox.collision_layer = 0
 	hitbox.collision_mask = 2
@@ -230,7 +255,7 @@ func _build_melee(wstrokes: Array) -> void:
 				body_radius = maxf(body_radius, p.length())
 
 func _build_projectile(wstrokes: Array) -> void:
-
+	# Projectile weapons add nothing to the body; the drawing only becomes the bullet.
 	var mn := Vector2(INF, INF)
 	var mx := Vector2(-INF, -INF)
 	for s in wstrokes:
@@ -266,12 +291,14 @@ func launch(dir: Vector2, power: float) -> void:
 	freeze = false
 	spin_ratio = 1.0
 	angular_velocity = PREVIEW_SPIN
-	linear_velocity = dir * stats.max_speed * lerpf(0.4, 1.0, power)
+	linear_velocity = dir * stats.max_speed * BASE_SPEED * lerpf(0.5, 1.0, power)
 	_fire_timer = 0.8
 	ai_active = true
 
 func stop() -> void:
 	ai_active = false
+	for i in 3:
+		_end_skill(i)
 	end_ultimate()
 
 # ---------- Physics loop ----------
@@ -282,13 +309,8 @@ func _physics_process(delta: float) -> void:
 	_kb_cd = maxf(_kb_cd - delta, 0.0)
 	_body_cd = maxf(_body_cd - delta, 0.0)
 	_update_spin(delta)
-	match archetype:
-		Archetype.ATTACK:
-			_ai_attack()
-		Archetype.SPEED:
-			_ai_speed(delta)
-		Archetype.DEFENSE:
-			_ai_defense()
+	_baseline_move()
+	_skill_tick(delta)
 	_update_status(delta)
 	_melee_tick(delta)
 	_fire_tick(delta)
@@ -328,36 +350,68 @@ func _on_body_entered(body: Node) -> void:
 	var other: Top = body
 	spin_ratio = maxf(spin_ratio - SPIN_HIT_LOSS, MIN_SPIN_RATIO)
 	var overdrive := archetype == Archetype.ATTACK and ult_time > 0.0
+	var charging := skill_active(Skill.ATTACK)
 
-	if archetype == Archetype.ATTACK and _kb_cd <= 0.0:
+	if (overdrive or charging) and _kb_cd <= 0.0:
 		_kb_cd = KNOCKBACK_COOLDOWN
 		var dir := (other.global_position - global_position).normalized()
-		other.apply_central_impulse(dir * mass * stats.max_speed * KNOCKBACK * (4.0 if overdrive else 1.0))
+		var k := 2.0 if overdrive else 1.2
+		other.apply_central_impulse(dir * mass * stats.max_speed * KNOCKBACK * k * 0.5)
 
 	if _body_cd <= 0.0 and not other.dead:
 		_body_cd = BODY_HIT_COOLDOWN
 		var rel := (linear_velocity - other.linear_velocity).length()
-		var dmg := clampf(rel * BODY_DAMAGE * 1.2, 1.0, 8.0)
+		var dmg := clampf(rel * BODY_DAMAGE * 2.2, 1.0, 14.0)
 		if overdrive:
 			dmg = other.stats.max_hp * OVERDRIVE_HIT_PERCENT
 		elif archetype == Archetype.SPEED and ult_time > 0.0:
 			dmg *= 3.0
+		if charging:
+			dmg *= CHARGE_DAMAGE
 		other.take_damage(int(dmg))
-		
-## Bigger drawings hit harder with their weapons.
+
+# ---------- Weapon multipliers ----------
+
+## Bigger drawings hit harder with melee weapons (set the constants to change direction).
 func size_mult() -> float:
 	return lerpf(SIZE_DAMAGE_MIN, SIZE_DAMAGE_MAX, stats.size_t)
-	
+
+func rate_mult() -> float:
+	return lerpf(0.7, 1.3, stats.size_t)
+
 func proj_damage_mult() -> float:
 	return lerpf(PROJ_DAMAGE_SMALL, PROJ_DAMAGE_BIG, stats.size_t)
 
 func proj_rate_mult() -> float:
 	return lerpf(PROJ_RATE_SMALL, PROJ_RATE_BIG, stats.size_t)
-	
-## Small tops attack faster, big tops slower.
-func rate_mult() -> float:
-	return lerpf(0.7, 1.3, stats.size_t)
-	
+
+func ult_melee_rate() -> float:
+	if ult_time <= 0.0:
+		return 1.0
+	match archetype:
+		Archetype.ATTACK: return 0.5
+		Archetype.SPEED: return 0.33
+		Archetype.DEFENSE: return 0.6
+	return 1.0
+
+func ult_melee_dmg() -> float:
+	if ult_time <= 0.0:
+		return 1.0
+	match archetype:
+		Archetype.ATTACK: return 2.5
+		Archetype.SPEED, Archetype.DEFENSE: return 2.0
+	return 1.0
+
+func ult_fire_rate() -> float:
+	if ult_time <= 0.0:
+		return 1.0
+	match archetype:
+		Archetype.SPEED: return 0.2
+		Archetype.DEFENSE: return 0.5
+	return 1.0
+
+# ---------- Weapons ----------
+
 func _melee_tick(delta: float) -> void:
 	_melee_cd = maxf(_melee_cd - delta, 0.0)
 	if hitbox == null or _melee_cd > 0.0:
@@ -398,17 +452,33 @@ func _fire_tick(delta: float) -> void:
 	var dmg := bullet_damage
 	if weapon_type == WeaponDefs.Type.THREE_PROJECTILES:
 		dmg = maxi(int(bullet_damage * THREE_PROJ_DAMAGE), 1)
-		dmg = maxi(int(dmg * proj_rate_mult()), 1)
+	dmg = maxi(int(dmg * proj_damage_mult()), 1)
 	for i in count:
 		var dir := Vector2.RIGHT.rotated(_spiral_angle + TAU * i / count)
 		var b := Bullet.new()
 		b.setup(self, bullet_strokes, bullet_radius, dmg, dir, weapon_color,
 				weapon_type == WeaponDefs.Type.SELF_RICOCHET,
 				weapon_type == WeaponDefs.Type.FIRE)
-		b.burn_dps = maxi(int(BURN_DAMAGE * proj_rate_mult()), 1)
+		b.burn_dps = maxi(int(BURN_DAMAGE * proj_damage_mult()), 1)
 		b.position = global_position + dir * (body_radius + bullet_radius + 6.0)
 		get_parent().add_child(b)
 	_spiral_angle += 0.9   # rotates every volley = spiral
+
+## Overdrive: instant fan of bullets at the enemy.
+func _fire_burst() -> void:
+	if bullet_strokes.is_empty() or not is_instance_valid(target):
+		return
+	var base := (target.global_position - global_position).angle()
+	var dmg := maxi(int(bullet_damage * proj_damage_mult()), 1)
+	for i in 5:
+		var dir := Vector2.RIGHT.rotated(base + (i - 2) * 0.22)
+		var b := Bullet.new()
+		b.setup(self, bullet_strokes, bullet_radius, dmg, dir, weapon_color,
+				weapon_type == WeaponDefs.Type.SELF_RICOCHET,
+				weapon_type == WeaponDefs.Type.FIRE)
+		b.burn_dps = maxi(int(BURN_DAMAGE * proj_damage_mult() * 0.5), 1)
+		b.position = global_position + dir * (body_radius + bullet_radius + 6.0)
+		get_parent().add_child(b)
 
 # ---------- Status effects ----------
 
@@ -438,88 +508,128 @@ func _update_status(delta: float) -> void:
 		tint = tint * Color(1.0, 0.6, 0.4)
 	modulate = tint
 
-# ---------- Movement AI ----------
+# ---------- Skills (button-activated) ----------
 
-func _ai_speed(delta: float) -> void:
-	var cruise := stats.max_speed * 1.5 * speed_boost
-	var spd := linear_velocity.length()
-	if spd < 30.0:
-		linear_velocity = Vector2.RIGHT.rotated(randf() * TAU) * cruise * 0.6
-	elif spd < cruise:
-		apply_central_force(linear_velocity.normalized() * mass * cruise * 2.0)
-	_impulse_timer -= delta
-	if _impulse_timer <= 0.0:
-		_impulse_timer = randf_range(0.5, 1.2)
-		apply_central_impulse(Vector2.RIGHT.rotated(randf() * TAU) * mass * cruise * 0.5)
-	if linear_velocity.length() > cruise * 1.4:
-		linear_velocity = linear_velocity.limit_length(cruise * 1.4)
-		
-func _ai_attack() -> void:
-	var floor_speed := stats.max_speed * ATTACK_MIN_SPEED
-	var spd := linear_velocity.length()
-	if spd >= floor_speed:
+## Gentle push so a top never just sits still.
+func _baseline_move() -> void:
+	if skill_active(Skill.DEFENSE):
 		return
-	var dir: Vector2
-	if spd > 20.0:
-		dir = linear_velocity.normalized()      # keep the current heading
-	elif is_instance_valid(target):
-		# Nearly stopped: restart toward the enemy with a little randomness
-		dir = (target.global_position - global_position).normalized().rotated(randf_range(-0.5, 0.5))
-	else:
-		dir = Vector2.RIGHT.rotated(randf() * TAU)
-	apply_central_force(dir * mass * floor_speed * 3.0)
+	var floor_speed := stats.max_speed * MIN_DRIFT
+	var spd := linear_velocity.length()
+	if spd < floor_speed:
+		var d := linear_velocity.normalized() if spd > 20.0 else Vector2.RIGHT.rotated(randf() * TAU)
+		apply_central_force(d * mass * floor_speed * 3.0)
 
-func _ai_defense() -> void:
-	var to_center := arena_center - global_position
-	var d := to_center.length()
-	if d > 25.0:
-		apply_central_force(to_center.normalized() * mass * 150.0 * clampf(d / 150.0, 0.2, 1.0))
+func skill_active(i: int) -> bool:
+	return skill_time[i] > 0.0
+
+func skill_ready(i: int) -> bool:
+	return ai_active and not dead and skill_time[i] <= 0.0 and skill_cd[i] <= 0.0
+
+func activate_skill(i: int) -> void:
+	if not skill_ready(i):
+		return
+	skill_time[i] = SKILL_TIME[i]
+	var col: Color = SKILL_COLORS[i]
+	match i:
+		Skill.ATTACK:
+			_add_skill_fx(i, col, body_radius + 10.0, false)
+			if is_instance_valid(target):
+				linear_velocity = (target.global_position - global_position).normalized() * stats.max_speed * 0.9
+		Skill.SPEED:
+			_add_skill_fx(i, col, body_radius + 8.0, false)
+			var d := linear_velocity.normalized()
+			if d == Vector2.ZERO:
+				d = Vector2.RIGHT.rotated(randf() * TAU)
+			linear_velocity = d * stats.max_speed * 0.95
+		Skill.DEFENSE:
+			mass = stats.mass * 3.0
+			linear_damp = 1.5
+			_add_skill_fx(i, col, body_radius + 16.0, true)
+	Fx.burst(get_parent(), global_position, col, 14, 80.0)
+	Fx.number(get_parent(), global_position, SKILL_NAMES[i] + "!", col)
+
+func _end_skill(i: int) -> void:
+	skill_time[i] = 0.0
+	skill_cd[i] = SKILL_COOLDOWN[i]
+	_remove_skill_fx(i)
+	if i == Skill.DEFENSE:
+		mass = stats.mass
+		linear_damp = 0.4
+
+func _skill_tick(delta: float) -> void:
+	for i in 3:
+		if skill_cd[i] > 0.0:
+			skill_cd[i] = maxf(skill_cd[i] - delta, 0.0)
+		if skill_time[i] > 0.0:
+			skill_time[i] -= delta
+			if skill_time[i] <= 0.0:
+				_end_skill(i)
+
+	if skill_active(Skill.ATTACK) and is_instance_valid(target) and not target.dead:
+		var dir := (target.global_position - global_position).normalized()
+		apply_central_force(dir * mass * stats.max_speed * 4.0)
+		linear_velocity = linear_velocity.limit_length(stats.max_speed * 0.9)
+
+	if skill_active(Skill.SPEED):
+		var spd := linear_velocity.length()
+		if spd > 1.0:
+			linear_velocity = linear_velocity.normalized() * maxf(spd, stats.max_speed * 0.8)
+		_trail_timer -= delta
+		if _trail_timer <= 0.0:
+			_trail_timer = 0.05
+			Fx.burst(get_parent(), global_position, SKILL_COLORS[Skill.SPEED], 1, 6.0)
+
+	if skill_active(Skill.DEFENSE):
+		var to_c := arena_center - global_position
+		if to_c.length() > 20.0:
+			apply_central_force(to_c.normalized() * mass * 200.0)
+		if _skill_fx.has(Skill.DEFENSE) and is_instance_valid(_skill_fx[Skill.DEFENSE]):
+			_skill_fx[Skill.DEFENSE].scale = Vector2.ONE * (1.0 + 0.08 * sin(skill_time[Skill.DEFENSE] * 12.0))
+
+	# Mach Drive ultimate keeps its speed (there is no constant movement AI anymore)
+	if archetype == Archetype.SPEED and ult_time > 0.0:
+		var want := stats.max_speed * speed_boost * 0.6
+		var s2 := linear_velocity.length()
+		if s2 > 1.0 and s2 < want:
+			linear_velocity = linear_velocity.normalized() * want
+
+func _add_skill_fx(i: int, color: Color, radius: float, filled: bool) -> void:
+	_remove_skill_fx(i)
+	var pts := PackedVector2Array()
+	for k in 24:
+		pts.append(Vector2.RIGHT.rotated(TAU * k / 24.0) * radius)
+	var node: Node2D
+	if filled:
+		var poly := Polygon2D.new()
+		poly.polygon = pts
+		poly.color = Color(color.r, color.g, color.b, 0.3)
+		node = poly
+		var edge := Line2D.new()
+		edge.points = pts
+		edge.closed = true
+		edge.width = 4.0
+		edge.default_color = color
+		poly.add_child(edge)
+	else:
+		var ring := Line2D.new()
+		ring.points = pts
+		ring.closed = true
+		ring.width = 5.0
+		ring.default_color = color
+		node = ring
+	node.z_index = 10
+	add_child(node)
+	_skill_fx[i] = node
+
+func _remove_skill_fx(i: int) -> void:
+	if _skill_fx.has(i):
+		if is_instance_valid(_skill_fx[i]):
+			_skill_fx[i].queue_free()
+		_skill_fx.erase(i)
 
 # ---------- Ultimates ----------
 
-## Cooldown multiplier for blade hits while an ultimate is active.
-func ult_melee_rate() -> float:
-	if ult_time <= 0.0:
-		return 1.0
-	match archetype:
-		Archetype.ATTACK: return 0.5
-		Archetype.SPEED: return 0.33
-		Archetype.DEFENSE: return 0.6
-	return 1.0
-
-func ult_melee_dmg() -> float:
-	if ult_time <= 0.0:
-		return 1.0
-	match archetype:
-		Archetype.ATTACK: return 2.5
-		Archetype.SPEED, Archetype.DEFENSE: return 2.0
-	return 1.0
-
-## Fire-interval multiplier while an ultimate is active.
-func ult_fire_rate() -> float:
-	if ult_time <= 0.0:
-		return 1.0
-	match archetype:
-		Archetype.SPEED: return 0.2
-		Archetype.DEFENSE: return 0.5
-	return 1.0
-
-## Overdrive: instant fan of bullets at the enemy.
-func _fire_burst() -> void:
-	if bullet_strokes.is_empty() or not is_instance_valid(target):
-		return
-	var base := (target.global_position - global_position).angle()
-	var dmg := maxi(int(bullet_damage * proj_damage_mult() * 1.0), 1)   # was * 2.0
-	for i in 5:                                                          # was 9
-		var dir := Vector2.RIGHT.rotated(base + (i - 2) * 0.22)          # was (i - 4) * 0.2
-		var b := Bullet.new()
-		b.setup(self, bullet_strokes, bullet_radius, dmg, dir, weapon_color,
-				weapon_type == WeaponDefs.Type.SELF_RICOCHET,
-				weapon_type == WeaponDefs.Type.FIRE)
-		b.burn_dps = maxi(int(BURN_DAMAGE * proj_damage_mult() * 0.5), 1)
-		b.position = global_position + dir * (body_radius + bullet_radius + 6.0)
-		get_parent().add_child(b)
-		
 func ult_ready() -> bool:
 	return ult_charge >= 1.0 and ult_time <= 0.0 and not ult_used and ai_active and not dead
 
@@ -536,7 +646,7 @@ func activate_ultimate() -> void:
 				linear_velocity = dir * stats.max_speed * 2.5
 			_make_fx(Color("ffd166"), body_radius + 10.0, false)
 			_fire_burst()                                  # volley 1 now
-			_burst_left = OVERDRIVE_VOLLEYS - 1            # 2 more to come
+			_burst_left = OVERDRIVE_VOLLEYS - 1            # more to come
 			_burst_timer = OVERDRIVE_VOLLEY_GAP
 		Archetype.SPEED:    # Mach Drive
 			ult_time = MACH_TIME
@@ -544,7 +654,7 @@ func activate_ultimate() -> void:
 			var d := linear_velocity.normalized()
 			if d == Vector2.ZERO:
 				d = Vector2.RIGHT.rotated(randf() * TAU)
-			linear_velocity = d * stats.max_speed * 1.5 * speed_boost
+			linear_velocity = d * stats.max_speed * 0.6 * speed_boost
 			_make_fx(Color("4dd0e1"), body_radius + 10.0, false)
 		Archetype.DEFENSE:  # Black Hole
 			ult_time = BLACKHOLE_TIME
@@ -554,10 +664,10 @@ func activate_ultimate() -> void:
 func end_ultimate() -> void:
 	ult_time = 0.0
 	speed_boost = 1.0
+	_burst_left = 0
 	if _ult_fx:
 		_ult_fx.queue_free()
 		_ult_fx = null
-		_burst_left = 0
 
 func _make_fx(color: Color, radius: float, filled: bool) -> void:
 	if _ult_fx:
@@ -613,7 +723,7 @@ func _ult_tick(delta: float) -> void:
 				b.linear_velocity = (target.global_position - b.global_position).normalized() * b.speed
 	if ult_time <= 0.0:
 		end_ultimate()
-		
+
 # ---------- Unstick ----------
 
 func _check_stuck(delta: float) -> void:
@@ -637,21 +747,29 @@ func _separate(other: Node) -> void:
 	else:
 		away = (arena_center - global_position).normalized()
 	apply_central_impulse(away * mass * stats.max_speed * 0.6)
-	
+
+# ---------- HP ----------
+
 func heal(amount: int) -> void:
 	if dead:
 		return
 	hp = mini(hp + amount, stats.max_hp)
 	hp_changed.emit(hp, stats.max_hp)
+	Fx.number(get_parent(), global_position, "+%d" % amount, UiStyle.GREEN)
+	Fx.burst(get_parent(), global_position, UiStyle.GREEN, 6, 40.0)
 
 func take_damage(amount: int) -> void:
 	if dead:
 		return
+	if skill_active(Skill.DEFENSE):
+		amount = maxi(int(amount * DEFENSE_DAMAGE_TAKEN), 1)
 	if archetype == Archetype.SPEED and ult_time > 0.0:
 		amount = maxi(int(amount * MACH_DAMAGE_TAKEN), 1)
 	ult_charge = minf(ult_charge + float(amount) / stats.max_hp * ULT_DAMAGE_GAIN, 1.0)
 	hp = maxi(hp - amount, 0)
 	hp_changed.emit(hp, stats.max_hp)
+	damaged.emit(amount)
+	Fx.hit(get_parent(), global_position, amount)
 	if hp == 0:
 		dead = true
 		end_ultimate()

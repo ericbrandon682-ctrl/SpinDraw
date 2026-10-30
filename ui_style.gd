@@ -1,41 +1,64 @@
 class_name UiStyle
 extends RefCounted
 
-# PICO-8 style palette
-const PINK := Color("ff77a8")
-const RED := Color("ff004d")
-const ORANGE := Color("ffa300")
-const YELLOW := Color("ffec27")
-const GREEN := Color("00e436")
-const BLUE := Color("29adff")
-const PURPLE := Color("7e2553")
-const LAVENDER := Color("83769c")
-const NAVY := Color("1d2b53")
-const INK := Color("0b0b1e")
+const WHITE := Color("ffffff")
+const BLACK := Color("000000")
+const INK := Color("07070f")
+const NAVY := Color("0d0d1f")
+const YELLOW := Color("ffd23f")
+const ORANGE := Color("ff8a2b")
+const RED := Color("ff4d4d")
+const PINK := Color("ff8fb8")
+const GREEN := Color("5ad66b")
+const BLUE := Color("4db8ff")
+const PURPLE := Color("a86bff")
+const LAVENDER := Color("9a9ab8")
 
-## Chunky pixel box: thick border, extra-thick bottom edge (looks 3D).
-static func box(color: Color, _radius: int = 0, margin: int = 12) -> StyleBoxFlat:
+const HEART := [
+	".WX.XX.",
+	"XXXXXXX",
+	"XXXXXXX",
+	".XXXXX.",
+	"..XXX..",
+	"...X...",
+]
+
+static var _tex_cache := {}
+
+static func heart_texture(color: Color = RED) -> ImageTexture:
+	var key := color.to_html()
+	if _tex_cache.has(key):
+		return _tex_cache[key]
+	var img := Image.create(7, 6, false, Image.FORMAT_RGBA8)
+	for y in HEART.size():
+		for x in 7:
+			var ch: String = HEART[y][x]
+			if ch == "X":
+				img.set_pixel(x, y, color)
+			elif ch == "W":
+				img.set_pixel(x, y, Color.WHITE)
+	var tex := ImageTexture.create_from_image(img)
+	_tex_cache[key] = tex
+	return tex
+
+static func _btn_box(bg: Color, border: Color) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = color
+	sb.bg_color = bg
 	sb.set_corner_radius_all(0)
-	sb.set_content_margin_all(margin)
-	sb.border_width_left = 4
-	sb.border_width_top = 4
-	sb.border_width_right = 4
-	sb.border_width_bottom = 8
-	sb.border_color = color.darkened(0.55)
+	sb.set_border_width_all(4)
+	sb.border_color = border
+	sb.set_content_margin_all(10)
 	sb.anti_aliasing = false
 	return sb
 
-## Button pushed down: shorter bottom edge, content shifts down.
-static func box_pressed(color: Color, margin: int = 12) -> StyleBoxFlat:
-	var sb := box(color, 0, margin)
-	sb.border_width_bottom = 4
-	sb.content_margin_top = margin + 4
+## Generic box: dark fill, colored border.
+static func box(color: Color, _radius: int = 0, margin: int = 12) -> StyleBoxFlat:
+	var sb := _btn_box(INK, color)
+	sb.set_content_margin_all(margin)
 	return sb
 
-## Framed panel with a bright colored border.
-static func panel(border: Color, bg: Color = NAVY, margin: int = 22) -> StyleBoxFlat:
+## Undertale-style dialogue box.
+static func panel(border: Color = WHITE, bg: Color = NAVY, margin: int = 22) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
 	sb.set_corner_radius_all(0)
@@ -45,12 +68,15 @@ static func panel(border: Color, bg: Color = NAVY, margin: int = 22) -> StyleBox
 	sb.anti_aliasing = false
 	return sb
 
+static func frame(border: Color = WHITE, bg: Color = NAVY, margin: int = 22) -> StyleBoxFlat:
+	return panel(border, bg, margin)
+
 static func bar_bg() -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = INK
+	sb.bg_color = Color("3a0d14")
 	sb.set_corner_radius_all(0)
-	sb.set_border_width_all(3)
-	sb.border_color = LAVENDER
+	sb.set_border_width_all(4)
+	sb.border_color = WHITE
 	sb.anti_aliasing = false
 	return sb
 
@@ -58,33 +84,51 @@ static func bar_fill(color: Color) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = color
 	sb.set_corner_radius_all(0)
-	sb.set_border_width_all(3)
-	sb.border_color = color.darkened(0.5)
 	sb.anti_aliasing = false
 	return sb
 
-## Dark outline so text pops on any background.
 static func outline(label: Label, size: int = 6) -> void:
-	label.add_theme_color_override("font_outline_color", INK)
+	label.add_theme_color_override("font_outline_color", BLACK)
 	label.add_theme_constant_override("outline_size", size)
 
-static func style_button(btn: Button, color: Color, height: float = 76.0, font_size: int = 28) -> void:
+static func _add_soul(btn: Button) -> void:
+	if btn.has_node("Soul") or btn.text.length() <= 2:
+		return
+	var soul := TextureRect.new()
+	soul.name = "Soul"
+	soul.texture = heart_texture(RED)
+	soul.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	soul.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	soul.stretch_mode = TextureRect.STRETCH_SCALE
+	soul.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	soul.visible = false
+	btn.add_child(soul)
+	soul.set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
+	soul.offset_left = 16.0
+	soul.offset_right = 44.0
+	soul.offset_top = -12.0
+	soul.offset_bottom = 12.0
+	btn.mouse_entered.connect(func(): soul.visible = not btn.disabled)
+	btn.mouse_exited.connect(func(): soul.visible = false)
+
+static func style_button(btn: Button, color: Color, height: float = 76.0, font_size: int = 28, soul: bool = true) -> void:
 	btn.custom_minimum_size.y = height
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.add_theme_font_size_override("font_size", font_size)
-	btn.add_theme_stylebox_override("normal", box(color))
-	btn.add_theme_stylebox_override("hover", box(color.lightened(0.2)))
-	btn.add_theme_stylebox_override("pressed", box_pressed(color.darkened(0.15)))
-	btn.add_theme_stylebox_override("disabled", box(Color("3a3d55")))
+	btn.add_theme_stylebox_override("normal", _btn_box(INK, color))
+	btn.add_theme_stylebox_override("hover", _btn_box(color.darkened(0.8), YELLOW))
+	btn.add_theme_stylebox_override("pressed", _btn_box(color.darkened(0.55), WHITE))
+	btn.add_theme_stylebox_override("disabled", _btn_box(INK, Color("3a3a4a")))
 	btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	for c in ["font_color", "font_hover_color", "font_pressed_color"]:
-		btn.add_theme_color_override(c, Color.WHITE)
-	btn.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.35))
-	btn.add_theme_color_override("font_outline_color", INK)
-	btn.add_theme_constant_override("outline_size", 4)
+	btn.add_theme_color_override("font_color", color.lightened(0.5))
+	btn.add_theme_color_override("font_hover_color", YELLOW)
+	btn.add_theme_color_override("font_pressed_color", WHITE)
+	btn.add_theme_color_override("font_disabled_color", Color("55556a"))
+	if soul:
+		_add_soul(btn)
 
-static func make_button(text: String, color: Color, height: float = 76.0, font_size: int = 28) -> Button:
+static func make_button(text: String, color: Color, height: float = 76.0, font_size: int = 28, soul: bool = true) -> Button:
 	var b := Button.new()
 	b.text = text
-	style_button(b, color, height, font_size)
+	style_button(b, color, height, font_size, soul)
 	return b
