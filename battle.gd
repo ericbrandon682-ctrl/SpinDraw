@@ -8,8 +8,22 @@ const AIM_MAX_DIST := 220.0
 const AIM_MIN_POWER := 0.15
 const MATCH_TIME := 90.0
 const COUNT_STEP := 0.8
+const NOTE_TIME := 5.0
 const ULT_NAMES := ["Overdrive Impact", "Mach Drive", "Black Hole"]
 const SKILL_LABELS := ["ATTACK", "SPEED", "DEFENSE"]
+const WEAPON_TIPS := [
+	"Your drawn blade is copied 3 times around the top. Hits fast on contact.",
+	"One big blade. Slow, heavy hits with strong knockback.",
+	"Hits slow the enemy's speed and spin for 2.5 seconds.",
+	"Fires 3 bullets in a spiral. Each bullet is weaker. Bullets bounce once off a wall.",
+	"Bullet bounces up to 6 times. If it loops back and hits you, it hits harder and turns on the enemy.",
+	"Bullets set the enemy on fire, draining its HP for 4 seconds.",
+]
+const ULT_TIPS := [
+	"Dash at the enemy. Each body hit takes a chunk of its max HP. Projectile tops fire 3 volleys. One use per match.",
+	"5 seconds of super speed, 90% less damage taken and faster weapon attacks. One use per match.",
+	"A field pulls the enemy in, drains its HP over time and destroys its bullets. One use per match.",
+]
 
 var state := State.SELECT
 var player: Top
@@ -23,17 +37,19 @@ var match_id := 0
 var enemy_ult_delay := 1.0
 var enemy_skill_delay := 2.0
 var shake := 0.0
+var danger_warned := false
 
 var arena: Arena
 var camera: Camera2D
 var tops_node: Node2D
 var aim_line: Line2D
 var select_holder: CenterContainer
-var arch_holder: CenterContainer
-var weapon_holder: CenterContainer
+var arch_holder: OptionPicker
+var weapon_holder: OptionPicker
 var grid: GridContainer
 var info_box: PanelContainer
 var info: Label
+var danger_note: PanelContainer
 var rematch_btn: Button
 var again_btn: Button
 var ult_btn: Button
@@ -43,6 +59,7 @@ var enemy_bar: ProgressBar
 var player_label: Label
 var enemy_label: Label
 var timer_label: Label
+var result_layer: CanvasLayer
 
 func _ready() -> void:
 	RenderingServer.set_default_clear_color(Color("07070f"))
@@ -86,6 +103,8 @@ func _process(delta: float) -> void:
 		_enemy_ult(delta)
 		_enemy_skills(delta)
 		arena.update_fight(delta, [player, enemy], MATCH_TIME - match_time)
+		if not danger_warned and MATCH_TIME - match_time >= Arena.DANGER_START:
+			_warn_danger()
 		if match_time <= 0.0:
 			_time_up()
 
@@ -160,11 +179,26 @@ func _build_ui() -> void:
 	info.add_theme_color_override("font_color", UiStyle.YELLOW)
 	info_box.add_child(info)
 
-	# Ultimate button
-	ult_btn = UiStyle.make_button("ULTIMATE", UiStyle.PINK, 76, 26)
-	ult_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	ult_btn.custom_minimum_size.x = 340
-	ult_btn.position = Vector2(470, 530)
+	# Danger ring explanation (right side, shown briefly)
+	danger_note = PanelContainer.new()
+	danger_note.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.RED, UiStyle.BLACK, 10))
+	danger_note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	danger_note.position = Vector2(1040, 240)
+	danger_note.visible = false
+	root.add_child(danger_note)
+	var dl := Label.new()
+	dl.text = "DANGER RING!\nThe red ring is shrinking. Stay inside it or lose HP every half second."
+	dl.custom_minimum_size.x = 200
+	dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dl.add_theme_font_size_override("font_size", 18)
+	dl.add_theme_color_override("font_color", UiStyle.WHITE)
+	danger_note.add_child(dl)
+
+	# Ultimate button	# Ultimate button (left column, under the three skills)
+	ult_btn = UiStyle.make_button("ULTIMATE", UiStyle.PINK, 84, 22, false)
+	ult_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	ult_btn.custom_minimum_size.x = 220
+	ult_btn.position = Vector2(16, 230 + 3 * 96)
 	ult_btn.visible = false
 	ult_btn.pressed.connect(_on_ult_pressed)
 	root.add_child(ult_btn)
@@ -172,7 +206,7 @@ func _build_ui() -> void:
 	# Skill buttons (left edge)
 	var sk_cols := [UiStyle.RED, UiStyle.YELLOW, UiStyle.BLUE]
 	for i in 3:
-		var sb := UiStyle.make_button(SKILL_LABELS[i], sk_cols[i], 84, 24)
+		var sb := UiStyle.make_button(SKILL_LABELS[i], sk_cols[i], 84, 24, false)
 		sb.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		sb.custom_minimum_size.x = 220
 		sb.position = Vector2(16, 230 + i * 96)
@@ -181,11 +215,11 @@ func _build_ui() -> void:
 		root.add_child(sb)
 		skill_btns.append(sb)
 
-	# Result buttons
+	# Result buttons (sit under the centered result text)
 	rematch_btn = UiStyle.make_button("REMATCH", UiStyle.GREEN, 70, 28)
 	rematch_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	rematch_btn.custom_minimum_size.x = 240
-	rematch_btn.position = Vector2(390, 530)
+	rematch_btn.position = Vector2(390, 400)
 	rematch_btn.visible = false
 	rematch_btn.pressed.connect(func(): _start_match(last_arch))
 	root.add_child(rematch_btn)
@@ -193,7 +227,7 @@ func _build_ui() -> void:
 	again_btn = UiStyle.make_button("PICK ANOTHER", UiStyle.BLUE, 70, 28)
 	again_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	again_btn.custom_minimum_size.x = 280
-	again_btn.position = Vector2(650, 530)
+	again_btn.position = Vector2(650, 400)
 	again_btn.visible = false
 	again_btn.pressed.connect(_show_select)
 	root.add_child(again_btn)
@@ -227,66 +261,40 @@ func _build_ui() -> void:
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(grid)
 
-	# --- Weapon type panel ---
-	weapon_holder = CenterContainer.new()
+	# --- Weapon type picker ---
+	weapon_holder = OptionPicker.new()
 	weapon_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(weapon_holder)
 	weapon_holder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var wpanel := PanelContainer.new()
-	wpanel.custom_minimum_size.x = 700
-	wpanel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.ORANGE))
-	weapon_holder.add_child(wpanel)
-	var wv := VBoxContainer.new()
-	wv.add_theme_constant_override("separation", 8)
-	wpanel.add_child(wv)
-	var wtitle := Label.new()
-	wtitle.text = "Choose weapon type"
-	wtitle.add_theme_font_size_override("font_size", 32)
-	wtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiStyle.outline(wtitle, 5)
-	wv.add_child(wtitle)
+	var witems: Array = []
 	for ty in range(1, 7):
 		var melee := WeaponDefs.is_melee(ty)
-		var wb := UiStyle.make_button(
-				"%s   (%s)" % [WeaponDefs.NAMES[ty], "MELEE" if melee else "PROJECTILE"],
-				UiStyle.ORANGE if melee else UiStyle.BLUE, 58, 22)
-		wb.tooltip_text = WeaponDefs.DESCRIPTIONS[ty]
-		wb.pressed.connect(_pick_weapon.bind(ty))
-		wv.add_child(wb)
-	var wback := UiStyle.make_button("Back", UiStyle.LAVENDER, 52, 22)
-	wback.pressed.connect(_show_select)
-	wv.add_child(wback)
+		witems.append({
+			"name": WeaponDefs.NAMES[ty],
+			"tag": "MELEE" if melee else "PROJECTILE",
+			"desc": WEAPON_TIPS[ty - 1],
+			"color": UiStyle.ORANGE if melee else UiStyle.BLUE})
+	weapon_holder.setup("CHOOSE WEAPON", UiStyle.ORANGE, witems)
+	weapon_holder.chosen.connect(func(i: int): _pick_weapon(i + 1))
+	weapon_holder.back.connect(_show_select)
 
-	# --- Ultimate panel ---
-	arch_holder = CenterContainer.new()
+	# --- Ultimate picker ---
+	arch_holder = OptionPicker.new()
 	arch_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(arch_holder)
 	arch_holder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var apanel := PanelContainer.new()
-	apanel.custom_minimum_size.x = 700
-	apanel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.PINK))
-	arch_holder.add_child(apanel)
-	var av := VBoxContainer.new()
-	av.add_theme_constant_override("separation", 12)
-	apanel.add_child(av)
-	var atitle := Label.new()
-	atitle.text = "Choose ultimate"
-	atitle.add_theme_font_size_override("font_size", 34)
-	atitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	UiStyle.outline(atitle, 5)
-	av.add_child(atitle)
-	var defs := [
-		["OVERDRIVE IMPACT  (ultimate)", UiStyle.RED, Top.Archetype.ATTACK],
-		["MACH DRIVE  (ultimate)", UiStyle.YELLOW, Top.Archetype.SPEED],
-		["BLACK HOLE  (ultimate)", UiStyle.BLUE, Top.Archetype.DEFENSE],
-	]
-	for d in defs:
-		var b := UiStyle.make_button(d[0], d[1], 76, 24)
-		b.pressed.connect(_start_match.bind(d[2]))
-		av.add_child(b)
-	var back := UiStyle.make_button("Back", UiStyle.LAVENDER, 60, 24)
-	back.pressed.connect(_show_select)
-	av.add_child(back)
+	var uitems: Array = []
+	var ucols := [UiStyle.RED, UiStyle.YELLOW, UiStyle.BLUE]
+	var utags := ["ATTACK ULTIMATE", "SPEED ULTIMATE", "DEFENSE ULTIMATE"]
+	for i in 3:
+		uitems.append({
+			"name": ULT_NAMES[i],
+			"tag": utags[i],
+			"desc": ULT_TIPS[i],
+			"color": ucols[i]})
+	arch_holder.setup("CHOOSE ULTIMATE", UiStyle.PINK, uitems)
+	arch_holder.chosen.connect(func(i: int): _start_match(i))
+	arch_holder.back.connect(_show_select)
 
 func _refresh_grid() -> void:
 	for c in grid.get_children():
@@ -360,6 +368,9 @@ func _set_skills_visible(v: bool) -> void:
 
 func _show_select() -> void:
 	match_id += 1
+	danger_warned = false
+	danger_note.visible = false
+	_hide_result()
 	_clear_tops()
 	arena.reset()
 	state = State.SELECT
@@ -385,6 +396,7 @@ func _choose_weapon(index: int) -> void:
 		_choose_archetype()
 	else:
 		state = State.ARCHETYPE
+		weapon_holder.reset()
 		weapon_holder.visible = true
 
 func _pick_weapon(type: int) -> void:
@@ -395,6 +407,7 @@ func _pick_weapon(type: int) -> void:
 func _choose_archetype() -> void:
 	state = State.ARCHETYPE
 	select_holder.visible = false
+	arch_holder.reset()
 	arch_holder.visible = true
 
 func _clear_tops() -> void:
@@ -446,6 +459,9 @@ func _on_hp_changed(hp: int, max_hp: int, bar: ProgressBar, label: Label, who: S
 
 func _start_match(player_arch: int) -> void:
 	match_id += 1
+	danger_warned = false
+	danger_note.visible = false
+	_hide_result()
 	_clear_tops()
 	arena.reset()
 	last_arch = player_arch
@@ -509,16 +525,16 @@ func _update_ult_ui() -> void:
 		return
 	if player.ult_time > 0.0:
 		ult_btn.disabled = true
-		ult_btn.text = "%s ACTIVE" % ULT_NAMES[player.archetype]
+		ult_btn.text = "ULT  %.1fs" % player.ult_time
 	elif player.ult_used:
 		ult_btn.disabled = true
-		ult_btn.text = "Ultimate used"
+		ult_btn.text = "ULT used"
 	elif player.ult_ready():
 		ult_btn.disabled = false
-		ult_btn.text = "ULTIMATE: %s" % ULT_NAMES[player.archetype]
+		ult_btn.text = "ULTIMATE!"
 	else:
 		ult_btn.disabled = true
-		ult_btn.text = "Ultimate %d%%" % int(player.ult_charge * 100.0)
+		ult_btn.text = "ULT  %d%%" % int(player.ult_charge * 100.0)
 
 func _enemy_ult(delta: float) -> void:
 	if enemy and enemy.ult_ready():
@@ -549,6 +565,19 @@ func _ult_fx(top: Top, mine: bool) -> void:
 	Fx.burst(tops_node, top.global_position, col, 16, 90.0)
 	shake = 14.0
 
+# ---------- Danger ring warning ----------
+
+func _warn_danger() -> void:
+	danger_warned = true
+	Fx.banner(self, "DANGER ZONE!", UiStyle.RED)
+	Fx.flash(self, UiStyle.RED)
+	shake = 8.0
+	danger_note.visible = true
+	var id := match_id
+	get_tree().create_timer(NOTE_TIME).timeout.connect(func():
+		if id == match_id:
+			danger_note.visible = false)
+
 # ---------- Ending ----------
 
 func _finish(message: String, loser: Top = null) -> void:
@@ -566,12 +595,49 @@ func _finish(message: String, loser: Top = null) -> void:
 		b.queue_free()
 	ult_btn.visible = false
 	_set_skills_visible(false)
-	info.text = message
-	Fx.banner(self, message, UiStyle.YELLOW)
+	danger_note.visible = false
+	info.text = ""
+	var win := message.contains("WIN")
+	var draw := message.contains("DRAW")
+	var col := UiStyle.GREEN if win else (UiStyle.YELLOW if draw else UiStyle.RED)
+	_show_result(message, col)
 	if loser:
 		Fx.burst(tops_node, loser.global_position, Color.WHITE, 22, 130.0)
 	rematch_btn.visible = true
 	again_btn.visible = true
+
+func _show_result(message: String, color: Color) -> void:
+	_hide_result()
+	result_layer = CanvasLayer.new()
+	result_layer.layer = 3
+	add_child(result_layer)
+
+	var l := Label.new()
+	l.text = message
+	l.size = Vector2(1280, 160)
+	l.position = Vector2(0, 200)
+	l.pivot_offset = Vector2(640, 80)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override("font_size", 96)
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_color_override("font_outline_color", Color.BLACK)
+	l.add_theme_constant_override("outline_size", 20)
+	l.scale = Vector2(2.0, 2.0)
+	l.modulate.a = 0.0
+	result_layer.add_child(l)
+
+	var tw := l.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(l, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(l, "modulate:a", 1.0, 0.15)
+
+func _hide_result() -> void:
+	if result_layer and is_instance_valid(result_layer):
+		result_layer.queue_free()
+	result_layer = null
 
 func _on_died(loser: Top) -> void:
 	_finish("YOU WIN!" if loser == enemy else "YOU LOSE", loser)

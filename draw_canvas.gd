@@ -60,16 +60,6 @@ func _draw() -> void:
 			box.end, Vector2(box.position.x, box.end.y)]:
 		draw_rect(Rect2(corner - Vector2(9, 9), Vector2(18, 18)), UiStyle.YELLOW)
 
-	if weapon_mode:
-		if wb_has:
-			var r := Rect2(wb_min, wb_max - wb_min)
-			var at_limit := r.size.x >= WEAPON_MAX_SIZE - 1.0 or r.size.y >= WEAPON_MAX_SIZE - 1.0
-			draw_rect(r, UiStyle.RED if at_limit else UiStyle.ORANGE, false, 3.0)
-		else:
-			var center := _body_rect().get_center()
-			var half := Vector2.ONE * WEAPON_MAX_SIZE * 0.5
-			draw_rect(Rect2(center - half, half * 2.0), Color(1, 0.7, 0.3, 0.5), false, 3.0)
-
 func _unhandled_input(event: InputEvent) -> void:
 	if not enabled:
 		return
@@ -102,11 +92,7 @@ func _body_rect() -> Rect2:
 	return Rect2(mn, mx - mn)
 
 func _constrain(pos: Vector2) -> Vector2:
-	pos = pos.clamp(box.position, box.end)
-	if weapon_mode and wb_has:
-		pos.x = clampf(pos.x, wb_max.x - WEAPON_MAX_SIZE, wb_min.x + WEAPON_MAX_SIZE)
-		pos.y = clampf(pos.y, wb_max.y - WEAPON_MAX_SIZE, wb_min.y + WEAPON_MAX_SIZE)
-	return pos
+	return pos.clamp(box.position, box.end)
 
 func _start(pos: Vector2) -> void:
 	is_drawing = true

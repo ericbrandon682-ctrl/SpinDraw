@@ -162,8 +162,7 @@ func _on_stroke_changed(is_valid: bool) -> void:
 
 func _update_weapon_status() -> void:
 	var n := canvas.strokes.size() - canvas.body_count
-	status.text = "Step 2: weapon (optional)\nYour body is hidden.\nDraw the weapon on its own.\nMax size: %d px\nStrokes: %d\n\nYou choose the weapon type before battle." % [
-		int(DrawCanvas.WEAPON_MAX_SIZE), maxi(n, 0)]
+	status.text = "Step 2: weapon (optional)\nDraw it any size. It shrinks to fit automatically.\nStrokes: %d\n\nYou choose the weapon type before battle." % maxi(n, 0)
 # ---------- Save ----------
 
 func _save() -> void:
@@ -175,9 +174,14 @@ func _save() -> void:
 			mn = mn.min(p)
 			mx = mx.max(p)
 	var wcenter := (mn + mx) * 0.5
+	var extent := maxf(mx.x - mn.x, mx.y - mn.y)
+	var fit := minf(1.0, DrawCanvas.WEAPON_MAX_SIZE / maxf(extent, 1.0))
 	var wstrokes: Array = []
 	for s in raw:
-		wstrokes.append(ShapeUtils.offset_points(s, -wcenter))
+		var shrunk := PackedVector2Array()
+		for p in ShapeUtils.offset_points(s, -wcenter):
+			shrunk.append(p * fit)
+		wstrokes.append(shrunk)
 	var weapon := {}
 	if not wstrokes.is_empty():
 		weapon = {"type": WeaponDefs.Type.NONE, "strokes": wstrokes}
