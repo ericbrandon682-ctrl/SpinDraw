@@ -19,14 +19,13 @@ func add_top(area: float, color: Color, strokes: Array, weapon: Dictionary = {},
 	save_tops()
 	return true
 
-func update_top(index: int, area: float, strokes: Array, weapon: Dictionary, p_name: String, p_color: Color) -> void:
+func update_top(index: int, area: float, strokes: Array, weapon: Dictionary, p_name: String) -> void:
 	if index < 0 or index >= tops.size():
 		return
 	tops[index]["area"] = area
 	tops[index]["strokes"] = strokes.duplicate()
 	tops[index]["weapon"] = weapon.duplicate()
 	tops[index]["name"] = p_name
-	tops[index]["color"] = p_color
 	save_tops()
 
 func remove_top(index: int) -> void:
@@ -64,7 +63,7 @@ func save_tops() -> void:
 		}
 		var w: Dictionary = t.get("weapon", {})
 		if not w.is_empty():
-			entry["weapon"] = {"type": w["type"], "color": w.get("color", Color("ffb347")).to_html(), "strokes": _strokes_to_json(w["strokes"])}
+			entry["weapon"] = {"type": w["type"], "strokes": _strokes_to_json(w["strokes"])}
 		out.append(entry)
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -84,7 +83,7 @@ func load_tops() -> void:
 		var weapon := {}
 		var w = d.get("weapon")
 		if typeof(w) == TYPE_DICTIONARY:
-			weapon = {"type": int(w["type"]), "color": Color(w.get("color", "ffb347")), "strokes": _strokes_from_json(w["strokes"])}
+			weapon = {"type": int(w["type"]), "strokes": _strokes_from_json(w["strokes"])}
 		tops.append({
 			"area": float(d["area"]),
 			"color": Color(d["color"]),
@@ -115,7 +114,7 @@ func import_top(d: Dictionary) -> Dictionary:
 	var weapon := {}
 	var w = d.get("weapon")
 	if typeof(w) == TYPE_DICTIONARY:
-		weapon = {"type": int(w["type"]), "color": Color(w.get("color", "ffb347")), "strokes": _strokes_from_json(w["strokes"])}
+		weapon = {"type": int(w["type"]), "strokes": _strokes_from_json(w["strokes"])}
 	return {
 		"area": float(d["area"]),
 		"color": Color(d["color"]),

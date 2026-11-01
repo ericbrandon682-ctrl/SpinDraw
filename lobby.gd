@@ -14,7 +14,6 @@ var got_opp := false
 var speed_check: CheckButton
 
 func _ready() -> void:
-	Audio.play_menu_music()
 	RenderingServer.set_default_clear_color(Color("07070f"))
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	Net.my = {}

@@ -20,24 +20,10 @@ var stage := Stage.BODY
 var body_data := {}
 var edit_index := -1
 
-var palette: SwatchPicker
-var body_color := Color("ff5d73")
-var weapon_color := Color("ffb347")
-
-func _on_color(c: Color) -> void:
-	if stage == Stage.BODY:
-		body_color = c
-	else:
-		weapon_color = c
-	canvas.set_pen(c)
-
 func _ready() -> void:
-	Audio.play_menu_music()
 	RenderingServer.set_default_clear_color(Color("07070f"))
 	canvas.attach_required = false   # weapon type is chosen before battle
 	_build_ui()
-	canvas.pen_color = body_color
-	palette.select(body_color)
 	canvas.stroke_changed.connect(_on_stroke_changed)
 	main_btn.pressed.connect(_on_main)
 	clear_btn.pressed.connect(_on_clear)
@@ -59,10 +45,10 @@ func _to_storage() -> void:
 func _build_ui() -> void:
 	panel.custom_minimum_size.x = 300
 	panel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.BLUE, UiStyle.NAVY, 20))
-	vbox.add_theme_constant_override("separation", 6)
+	vbox.add_theme_constant_override("separation", 14)
 
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status.add_theme_font_size_override("font_size", 18)
+	status.add_theme_font_size_override("font_size", 22)
 	status.add_theme_color_override("font_color", Color("e6e9ef"))
 	UiStyle.outline(status, 4)
 	status.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -70,7 +56,7 @@ func _build_ui() -> void:
 
 	var old_row := main_btn.get_parent()
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 6)
+	column.add_theme_constant_override("separation", 10)
 	vbox.add_child(column)
 
 	undo_btn = Button.new()
@@ -91,7 +77,7 @@ func _build_ui() -> void:
 	name_edit = LineEdit.new()
 	name_edit.placeholder_text = "Name your top"
 	name_edit.max_length = 14
-	name_edit.custom_minimum_size.y = 44
+	name_edit.custom_minimum_size.y = 56
 	name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_edit.add_theme_font_size_override("font_size", 24)
 	name_edit.add_theme_color_override("font_color", UiStyle.YELLOW)
@@ -105,34 +91,25 @@ func _build_ui() -> void:
 	name_edit.add_theme_stylebox_override("focus", name_focus)
 	column.add_child(name_edit)
 	column.move_child(name_edit, 1)
-	palette = SwatchPicker.new()
-	palette.picked.connect(_on_color)
-	column.add_child(palette)
-	column.move_child(palette, 2)
-	UiStyle.style_button(main_btn, UiStyle.GREEN, 60, 24)
-	UiStyle.style_button(undo_btn, UiStyle.BLUE, 44, 20)
-	UiStyle.style_button(clear_btn, UiStyle.RED, 44, 20)
-	UiStyle.style_button(back_btn, UiStyle.LAVENDER, 44, 18)
-	UiStyle.style_button(menu_btn, UiStyle.PURPLE, 44, 20)
+	UiStyle.style_button(main_btn, UiStyle.GREEN, 80, 26)
+	UiStyle.style_button(undo_btn, UiStyle.BLUE, 56, 24)
+	UiStyle.style_button(clear_btn, UiStyle.RED, 56, 24)
+	UiStyle.style_button(back_btn, UiStyle.LAVENDER, 56, 22)
+	UiStyle.style_button(menu_btn, UiStyle.PURPLE, 56, 24)
 
 func _load_existing(i: int) -> void:
 	var data: Dictionary = GameData.tops[i]
-	var wdata: Dictionary = data.get("weapon", {})
-	var wstrokes: Array = wdata.get("strokes", [])
-	body_color = data["color"]
-	weapon_color = wdata.get("color", Color("ffb347"))
-	canvas.load_shape(data["strokes"], wstrokes, body_color, weapon_color)
+	var wstrokes: Array = data.get("weapon", {}).get("strokes", [])
+	canvas.load_shape(data["strokes"], wstrokes)
 	name_edit.text = str(data.get("name", ""))
 	if not wstrokes.is_empty():
 		body_data = canvas.build_shape()
 		_set_stage(Stage.WEAPON)
 	else:
-		palette.select(body_color)
 		_on_stroke_changed(canvas.build_shape().size() > 0)
 
 func _set_stage(s: Stage) -> void:
 	stage = s
-	palette.select(weapon_color if s == Stage.WEAPON else body_color)
 	var weapon_stage := s == Stage.WEAPON
 	back_btn.visible = weapon_stage
 	if weapon_stage:
@@ -152,7 +129,6 @@ func _on_main() -> void:
 			return
 		body_data = shape
 		canvas.enter_weapon_mode()
-		canvas.pen_color = weapon_color
 		_set_stage(Stage.WEAPON)
 	else:
 		_save()
@@ -208,18 +184,18 @@ func _save() -> void:
 		wstrokes.append(shrunk)
 	var weapon := {}
 	if not wstrokes.is_empty():
-		weapon = {"type": WeaponDefs.Type.NONE, "strokes": wstrokes, "color": weapon_color}
+		weapon = {"type": WeaponDefs.Type.NONE, "strokes": wstrokes}
 
 	var tname := name_edit.text.strip_edges()
 	if edit_index >= 0:
 		if tname.is_empty():
 			tname = "Top %d" % (edit_index + 1)
-			GameData.update_top(edit_index, body_data["area"], body_data["strokes_local"], weapon, tname, body_color)
+		GameData.update_top(edit_index, body_data["area"], body_data["strokes_local"], weapon, tname)
 	else:
 		if tname.is_empty():
 			tname = "Top %d" % (GameData.tops.size() + 1)
 		var color: Color = COLORS[GameData.tops.size() % COLORS.size()]
-		var ok := GameData.add_top(body_data["area"], body_color, body_data["strokes_local"], weapon, tname)
+		var ok := GameData.add_top(body_data["area"], color, body_data["strokes_local"], weapon, tname)
 		if not ok:
 			status.text = "Storage is full (%d). Delete a top in Storage first." % GameData.MAX_TOPS
 			return
