@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://bhu8sgfcs25np"]
+
+[ext_resource type="Script" uid="uid://bxl5pkrau2p8g" path="res://online_battle.gd" id="1_djt0w"]
+
+[node name="OnlineBattle" type="Node2D" unique_id=1535999340]
+script = ExtResource("1_djt0w")

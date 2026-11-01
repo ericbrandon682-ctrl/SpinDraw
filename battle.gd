@@ -62,6 +62,7 @@ var timer_label: Label
 var result_layer: CanvasLayer
 
 func _ready() -> void:
+	Audio.play_battle_music()
 	RenderingServer.set_default_clear_color(Color("07070f"))
 
 	arena = Arena.new()
@@ -368,6 +369,7 @@ func _set_skills_visible(v: bool) -> void:
 
 func _show_select() -> void:
 	match_id += 1
+	Audio.resume_music()
 	danger_warned = false
 	danger_note.visible = false
 	_hide_result()
@@ -436,7 +438,7 @@ func _make_top(index: int, offset: Vector2, wtype: int) -> Top:
 		var ws: Array = []
 		for s in w["strokes"]:
 			ws.append(_scaled(s))
-		weapon = {"type": wtype, "strokes": ws}
+			weapon = {"type": wtype, "strokes": ws, "color": w.get("color", data["color"].lightened(0.5))}
 
 	var top := Top.new()
 	top.setup(strokes_small, stats, data["color"], weapon)
@@ -459,6 +461,7 @@ func _on_hp_changed(hp: int, max_hp: int, bar: ProgressBar, label: Label, who: S
 
 func _start_match(player_arch: int) -> void:
 	match_id += 1
+	Audio.resume_music()
 	danger_warned = false
 	danger_note.visible = false
 	_hide_result()
@@ -510,12 +513,12 @@ func _update_skill_ui() -> void:
 		return
 	for i in 3:
 		var b := skill_btns[i]
-		if player.skill_time[i] > 0.0:
+		if player.mode == i:
 			b.disabled = false
-			b.text = "%s  %.1fs" % [SKILL_LABELS[i], player.skill_time[i]]
-		elif player.skill_cd[i] > 0.0:
+			b.text = "> %s <" % SKILL_LABELS[i]
+		elif player.mode_cd > 0.0:
 			b.disabled = true
-			b.text = "%s  wait %d" % [SKILL_LABELS[i], ceili(player.skill_cd[i])]
+			b.text = "%s  wait %d" % [SKILL_LABELS[i], ceili(player.mode_cd)]
 		else:
 			b.disabled = false
 			b.text = SKILL_LABELS[i]
@@ -550,7 +553,7 @@ func _enemy_skills(delta: float) -> void:
 	enemy_skill_delay -= delta
 	if enemy_skill_delay > 0.0:
 		return
-	enemy_skill_delay = randf_range(2.0, 4.0)
+	enemy_skill_delay = randf_range(6.0, 10.0)
 	var options: Array[int] = []
 	for i in 3:
 		if enemy.skill_ready(i):
@@ -560,6 +563,7 @@ func _enemy_skills(delta: float) -> void:
 
 func _ult_fx(top: Top, mine: bool) -> void:
 	var col := UiStyle.YELLOW if mine else UiStyle.RED
+	Audio.play_sfx(Audio.ULTIMATE_SFX)
 	Fx.flash(self, col)
 	Fx.banner(self, ("" if mine else "ENEMY: ") + ULT_NAMES[top.archetype].to_upper() + "!", col)
 	Fx.burst(tops_node, top.global_position, col, 16, 90.0)
@@ -601,6 +605,8 @@ func _finish(message: String, loser: Top = null) -> void:
 	var draw := message.contains("DRAW")
 	var col := UiStyle.GREEN if win else (UiStyle.YELLOW if draw else UiStyle.RED)
 	_show_result(message, col)
+	Audio.play_sfx(Audio.WIN_SFX if win else Audio.LOSE_SFX)
+	Audio.pause_music()
 	if loser:
 		Fx.burst(tops_node, loser.global_position, Color.WHITE, 22, 130.0)
 	rematch_btn.visible = true
@@ -691,6 +697,7 @@ func _launch() -> void:
 
 func _countdown(dir: Vector2, power: float) -> void:
 	var id := match_id
+	Audio.play_sfx(Audio.COUNTDOWN_SFX)
 	for n in [3, 2, 1]:
 		_pop(str(n), UiStyle.YELLOW, 120)
 		await get_tree().create_timer(COUNT_STEP).timeout

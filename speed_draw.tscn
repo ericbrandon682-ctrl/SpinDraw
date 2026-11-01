@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dkc0dl3f5ihvp"]
+
+[ext_resource type="Script" uid="uid://b21i82klpmlsu" path="res://speed_draw.gd" id="1_n2y3h"]
+
+[node name="SpeedDraw" type="Node2D" unique_id=1364421973]
+script = ExtResource("1_n2y3h")

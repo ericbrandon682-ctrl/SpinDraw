@@ -303,3 +303,27 @@ func _update_danger(delta: float, live: Array, elapsed: float) -> void:
 	for t in live:
 		if t.global_position.distance_to(global_position) > safe:
 			t.take_damage(maxi(int(t.stats.max_hp * DANGER_PERCENT), 1))
+			
+# ---------- Guest display (online) ----------
+
+var remote_orbs: Array = []
+
+func apply_remote(elapsed: float, orb_pos: Array) -> void:
+	if elapsed < DANGER_START:
+		danger_ring.visible = false
+	else:
+		danger_ring.visible = true
+		danger_ring.points = _circle(_safe_radius(elapsed), 48)
+		danger_ring.modulate.a = 0.6 + 0.4 * sin(elapsed * 6.0)
+	while remote_orbs.size() > orb_pos.size():
+		remote_orbs.pop_back().queue_free()
+	while remote_orbs.size() < orb_pos.size():
+		var s := Sprite2D.new()
+		s.texture = UiStyle.heart_texture(Color("ff4d6d"))
+		s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		s.scale = Vector2(5, 5)
+		s.z_index = 3
+		add_child(s)
+		remote_orbs.append(s)
+	for i in orb_pos.size():
+		remote_orbs[i].position = Vector2(orb_pos[i][0], orb_pos[i][1])

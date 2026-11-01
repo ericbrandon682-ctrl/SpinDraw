@@ -15,8 +15,9 @@ const SKILL_NAMES := ["CHARGE", "SPEED UP", "SHIELD"]
 const SKILL_TIME := [2.0, 3.0, 3.5]
 const SKILL_COOLDOWN := [8.0, 7.0, 10.0]
 const SKILL_COLORS := [Color("ff4d4d"), Color("ffd23f"), Color("4db8ff")]
-const CHARGE_DAMAGE := 1.8
+const CHARGE_DAMAGE := 1.4
 const DEFENSE_DAMAGE_TAKEN := 0.4
+const MODE_COOLDOWN := 5.0
 
 # ---------- Shapes ----------
 const LINE_WIDTH := 3.0
@@ -29,15 +30,17 @@ const THREE_PROJ_DAMAGE := 0.5     # each bullet of "3 Projectiles" deals this f
 # ---------- Ultimates ----------
 const ULT_PASSIVE := 0.015
 const ULT_DAMAGE_GAIN := 1.0       # charge gained = damage / max_hp * this
-const OVERDRIVE_TIME := 3.0
-const MACH_TIME := 5.0
+const OVERDRIVE_TIME := 4.0
+const MACH_TIME := 6.0
 const BLACKHOLE_TIME := 5.0
 const BLACKHOLE_RADIUS := 260.0
-const OVERDRIVE_HIT_PERCENT := 0.12    # of enemy max HP per hit
+const OVERDRIVE_HIT_PERCENT := 0.16    # of enemy max HP per hit
 const BLACKHOLE_TICK_PERCENT := 0.03   # of enemy max HP per 0.5 s
 const MACH_DAMAGE_TAKEN := 0.1         # 90% reduction
-const OVERDRIVE_VOLLEYS := 3
-const OVERDRIVE_VOLLEY_GAP := 0.7
+const OVERDRIVE_VOLLEYS := 4
+const OVERDRIVE_VOLLEY_GAP := 0.5
+const MACH_RAM_PERCENT := 0.07    # of enemy max HP per body hit
+const MACH_SPEED := 2.6           # multiplier on max_speed
 
 # ---------- Knockback ----------
 const KNOCKBACK := 0.9
@@ -102,6 +105,8 @@ var fire_interval := 1.5
 var _fire_timer := 0.0
 var _spiral_angle := 0.0
 var _melee_cd := 0.0
+var mode := -1          # -1 = none, otherwise Skill.ATTACK / SPEED / DEFENSE
+var mode_cd := 0.0
 
 # Status effects
 var slow_time := 0.0
@@ -219,7 +224,7 @@ func _setup_weapon(weapon: Dictionary, color: Color) -> void:
 	if wstrokes.is_empty():
 		weapon_type = WeaponDefs.Type.NONE
 		return
-	weapon_color = color.lightened(0.5)
+	weapon_color = weapon.get("color", color.lightened(0.5))
 	if WeaponDefs.is_melee(weapon_type):
 		_build_melee(wstrokes)
 	elif WeaponDefs.is_projectile(weapon_type):
@@ -297,9 +302,9 @@ func launch(dir: Vector2, power: float) -> void:
 
 func stop() -> void:
 	ai_active = false
-	for i in 3:
-		_end_skill(i)
-	end_ultimate()
+	if mode >= 0:
+		_end_skill(mode)
+	mode = -1
 
 # ---------- Physics loop ----------
 
@@ -359,13 +364,15 @@ func _on_body_entered(body: Node) -> void:
 		other.apply_central_impulse(dir * mass * stats.max_speed * KNOCKBACK * k * 0.5)
 
 	if _body_cd <= 0.0 and not other.dead:
-		_body_cd = BODY_HIT_COOLDOWN
+		_body_cd = BODY_HIT_COOLDOWN * (0.4 if overdrive else 1.0)
 		var rel := (linear_velocity - other.linear_velocity).length()
 		var dmg := clampf(rel * BODY_DAMAGE * 2.2, 1.0, 14.0)
 		if overdrive:
-			dmg = other.stats.max_hp * OVERDRIVE_HIT_PERCENT
+			Fx.burst(get_parent(), other.global_position, Color("ffd166"), 18, 100.0)
+			Fx.flash(get_parent(), Color("ffd166"))
 		elif archetype == Archetype.SPEED and ult_time > 0.0:
-			dmg *= 3.0
+			dmg = other.stats.max_hp * MACH_RAM_PERCENT
+			Fx.burst(get_parent(), other.global_position, Color("4dd0e1"), 14, 90.0)
 		if charging:
 			dmg *= CHARGE_DAMAGE
 		other.take_damage(int(dmg))
@@ -521,15 +528,19 @@ func _baseline_move() -> void:
 		apply_central_force(d * mass * floor_speed * 3.0)
 
 func skill_active(i: int) -> bool:
-	return skill_time[i] > 0.0
+	return mode == i
 
 func skill_ready(i: int) -> bool:
-	return ai_active and not dead and skill_time[i] <= 0.0 and skill_cd[i] <= 0.0
+	return ai_active and not dead and mode != i and mode_cd <= 0.0
 
+## Switches to mode i (permanent until another mode is picked).
 func activate_skill(i: int) -> void:
 	if not skill_ready(i):
 		return
-	skill_time[i] = SKILL_TIME[i]
+	if mode >= 0:
+		_end_skill(mode)
+	mode = i
+	mode_cd = MODE_COOLDOWN
 	var col: Color = SKILL_COLORS[i]
 	match i:
 		Skill.ATTACK:
@@ -547,51 +558,46 @@ func activate_skill(i: int) -> void:
 			linear_damp = 1.5
 			_add_skill_fx(i, col, body_radius + 16.0, true)
 	Fx.burst(get_parent(), global_position, col, 14, 80.0)
-	Fx.number(get_parent(), global_position, SKILL_NAMES[i] + "!", col)
+	Fx.number(get_parent(), global_position, SKILL_NAMES[i] + " MODE", col)
 
+## Removes the effects of a mode (no cooldown here, the switch sets it).
 func _end_skill(i: int) -> void:
-	skill_time[i] = 0.0
-	skill_cd[i] = SKILL_COOLDOWN[i]
 	_remove_skill_fx(i)
 	if i == Skill.DEFENSE:
 		mass = stats.mass
 		linear_damp = 0.4
 
 func _skill_tick(delta: float) -> void:
-	for i in 3:
-		if skill_cd[i] > 0.0:
-			skill_cd[i] = maxf(skill_cd[i] - delta, 0.0)
-		if skill_time[i] > 0.0:
-			skill_time[i] -= delta
-			if skill_time[i] <= 0.0:
-				_end_skill(i)
+	mode_cd = maxf(mode_cd - delta, 0.0)
 
-	if skill_active(Skill.ATTACK) and is_instance_valid(target) and not target.dead:
+	if mode == Skill.ATTACK and ult_time <= 0.0 and is_instance_valid(target) and not target.dead:
 		var dir := (target.global_position - global_position).normalized()
-		apply_central_force(dir * mass * stats.max_speed * 4.0)
+		apply_central_force(dir * mass * stats.max_speed * 2.0)
 		linear_velocity = linear_velocity.limit_length(stats.max_speed * 0.9)
 
-	if skill_active(Skill.SPEED):
+	if mode == Skill.SPEED:
 		var spd := linear_velocity.length()
 		if spd > 1.0:
 			linear_velocity = linear_velocity.normalized() * maxf(spd, stats.max_speed * 0.8)
 		_trail_timer -= delta
 		if _trail_timer <= 0.0:
-			_trail_timer = 0.05
+			_trail_timer = 0.08
 			Fx.burst(get_parent(), global_position, SKILL_COLORS[Skill.SPEED], 1, 6.0)
 
-	if skill_active(Skill.DEFENSE):
+	if mode == Skill.DEFENSE:
 		var to_c := arena_center - global_position
 		if to_c.length() > 20.0:
 			apply_central_force(to_c.normalized() * mass * 200.0)
 		if _skill_fx.has(Skill.DEFENSE) and is_instance_valid(_skill_fx[Skill.DEFENSE]):
-			_skill_fx[Skill.DEFENSE].scale = Vector2.ONE * (1.0 + 0.08 * sin(skill_time[Skill.DEFENSE] * 12.0))
+			_skill_fx[Skill.DEFENSE].scale = Vector2.ONE * (1.0 + 0.08 * sin(Time.get_ticks_msec() / 80.0))
 
-	# Mach Drive ultimate keeps its speed (there is no constant movement AI anymore)
+	# Mach Drive: hold a very high speed, ignore damping, bounce off walls at full speed
 	if archetype == Archetype.SPEED and ult_time > 0.0:
-		var want := stats.max_speed * speed_boost * 0.6
+		var want := stats.max_speed * MACH_SPEED * 0.6
 		var s2 := linear_velocity.length()
-		if s2 > 1.0 and s2 < want:
+		if s2 < 1.0:
+			linear_velocity = Vector2.RIGHT.rotated(randf() * TAU) * want
+		else:
 			linear_velocity = linear_velocity.normalized() * want
 
 func _add_skill_fx(i: int, color: Color, radius: float, filled: bool) -> void:
@@ -721,6 +727,24 @@ func _ult_tick(delta: float) -> void:
 				b.queue_free()
 			else:
 				b.linear_velocity = (target.global_position - b.global_position).normalized() * b.speed
+				if archetype == Archetype.ATTACK and ult_time > 0.0 \
+						and is_instance_valid(target) and not target.dead:
+					var to_t := (target.global_position - global_position).normalized()
+					apply_central_force(to_t * mass * stats.max_speed * 6.0)
+					linear_velocity = linear_velocity.limit_length(stats.max_speed * 2.2)
+	if archetype == Archetype.SPEED and ult_time > 0.0 \
+			and is_instance_valid(target) and not target.dead:
+		var want_dir := (target.global_position - global_position).normalized()
+		var cur := linear_velocity.normalized()
+		if cur != Vector2.ZERO:
+			linear_velocity = cur.slerp(want_dir, 0.04) * linear_velocity.length()
+			
+	if archetype == Archetype.SPEED and ult_time > 0.0:
+		_trail_timer -= delta
+		if _trail_timer <= 0.0:
+			_trail_timer = 0.04
+			Fx.burst(get_parent(), global_position, Color("4dd0e1"), 2, 14.0)
+			
 	if ult_time <= 0.0:
 		end_ultimate()
 
@@ -774,3 +798,28 @@ func take_damage(amount: int) -> void:
 		dead = true
 		end_ultimate()
 		died.emit()
+		
+## Used by the guest to show the aura for a mode the host chose.
+func show_mode_fx(m: int) -> void:
+	for i in 3:
+		_remove_skill_fx(i)
+	if m < 0:
+		return
+	var col: Color = SKILL_COLORS[m]
+	match m:
+		Skill.ATTACK:
+			_add_skill_fx(m, col, body_radius + 10.0, false)
+		Skill.SPEED:
+			_add_skill_fx(m, col, body_radius + 8.0, false)
+		Skill.DEFENSE:
+			_add_skill_fx(m, col, body_radius + 16.0, true)
+			
+## Used by the guest to show the ultimate's ring or field.
+func show_ult_fx() -> void:
+	match archetype:
+		Archetype.ATTACK:
+			_make_fx(Color("ffd166"), body_radius + 10.0, false)
+		Archetype.SPEED:
+			_make_fx(Color("4dd0e1"), body_radius + 10.0, false)
+		Archetype.DEFENSE:
+			_make_fx(Color("9b5de5"), BLACKHOLE_RADIUS, true)

@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="SpinDraw2"
+config/name="SpinDraw"
 run/main_scene="uid://8l7i2cjlo3vq"
 config/features=PackedStringArray("4.7", "Mobile")
 config/icon="res://icon.svg"
@@ -18,6 +18,8 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameData="*uid://bqn7mioum7nlc"
+Net="*uid://o3bo2ggepgjo"
+Audio="*uid://dn4onvk36d5wf"
 
 [display]
 
@@ -40,3 +42,4 @@ common/physics_ticks_per_second=120
 textures/canvas_textures/default_texture_filter=0
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
