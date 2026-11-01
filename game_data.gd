@@ -91,3 +91,34 @@ func load_tops() -> void:
 			"weapon": weapon,
 			"name": str(d.get("name", "")),
 		})
+
+# ---------- Sending a top to another player ----------
+
+func export_top(i: int) -> Dictionary:
+	return export_dict(tops[i])
+
+func export_dict(t: Dictionary) -> Dictionary:
+	var w: Dictionary = t.get("weapon", {})
+	var out := {
+		"area": t["area"],
+		"color": t["color"].to_html(),
+		"name": t.get("name", ""),
+		"strokes": _strokes_to_json(t["strokes"]),
+		"weapon": null,
+	}
+	if not w.is_empty():
+		out["weapon"] = {"type": w["type"], "strokes": _strokes_to_json(w["strokes"])}
+	return out
+
+func import_top(d: Dictionary) -> Dictionary:
+	var weapon := {}
+	var w = d.get("weapon")
+	if typeof(w) == TYPE_DICTIONARY:
+		weapon = {"type": int(w["type"]), "strokes": _strokes_from_json(w["strokes"])}
+	return {
+		"area": float(d["area"]),
+		"color": Color(d["color"]),
+		"strokes": _strokes_from_json(d["strokes"]),
+		"weapon": weapon,
+		"name": str(d.get("name", "")),
+	}

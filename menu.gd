@@ -59,6 +59,10 @@ func _ready() -> void:
 	battle_btn.disabled = GameData.tops.is_empty()
 	battle_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://battle.tscn"))
 	box.add_child(battle_btn)
+	
+	var lan_btn := UiStyle.make_button("LAN PLAY", UiStyle.BLUE, 84, 36)
+	lan_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://lobby.tscn"))
+	box.add_child(lan_btn)
 
 	# Undertale-style dialogue box with typewriter text
 	var dlg := PanelContainer.new()

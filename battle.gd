@@ -510,12 +510,12 @@ func _update_skill_ui() -> void:
 		return
 	for i in 3:
 		var b := skill_btns[i]
-		if player.skill_time[i] > 0.0:
+		if player.mode == i:
 			b.disabled = false
-			b.text = "%s  %.1fs" % [SKILL_LABELS[i], player.skill_time[i]]
-		elif player.skill_cd[i] > 0.0:
+			b.text = "> %s <" % SKILL_LABELS[i]
+		elif player.mode_cd > 0.0:
 			b.disabled = true
-			b.text = "%s  wait %d" % [SKILL_LABELS[i], ceili(player.skill_cd[i])]
+			b.text = "%s  wait %d" % [SKILL_LABELS[i], ceili(player.mode_cd)]
 		else:
 			b.disabled = false
 			b.text = SKILL_LABELS[i]
@@ -550,7 +550,7 @@ func _enemy_skills(delta: float) -> void:
 	enemy_skill_delay -= delta
 	if enemy_skill_delay > 0.0:
 		return
-	enemy_skill_delay = randf_range(2.0, 4.0)
+	enemy_skill_delay = randf_range(6.0, 10.0)
 	var options: Array[int] = []
 	for i in 3:
 		if enemy.skill_ready(i):
