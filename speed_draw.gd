@@ -2,12 +2,6 @@ extends Node2D
 
 enum Phase { BODY, WEAPON, PICK, WAIT }
 
-var panel: PanelContainer
-var picker_layer: CanvasLayer
-var pending_top := {}
-var has_weapon := false
-var weapon_choice := 1
-
 const BODY_TIME := 45.0
 const WEAPON_TIME := 20.0
 const COLORS := [Color("ff5d73"), Color("4dd0e1")]
@@ -27,11 +21,19 @@ const ULT_TIPS := [
 ]
 
 var canvas: DrawCanvas
+var panel: PanelContainer
+var palette: SwatchPicker
+var picker_layer: CanvasLayer
 var phase := Phase.BODY
 var time_left := BODY_TIME
 var body_data := {}
+var pending_top := {}
+var has_weapon := false
+var weapon_choice := 1
 var my_done := false
 var opp_done := false
+var body_color := Color.WHITE
+var weapon_color := Color("ffb347")
 
 var timer_label: Label
 var phase_label: Label
@@ -41,12 +43,16 @@ var undo_btn: Button
 var clear_btn: Button
 
 func _ready() -> void:
+	Audio.play_menu_music()
 	RenderingServer.set_default_clear_color(Color("07070f"))
 	canvas = DrawCanvas.new()
 	canvas.attach_required = false
 	add_child(canvas)
 	canvas.stroke_changed.connect(_on_stroke)
 	_build_ui()
+	body_color = COLORS[0 if Net.is_host else 1]
+	canvas.pen_color = body_color
+	palette.select(body_color)
 	Net.message.connect(_on_message)
 	Net.peer_left.connect(_on_peer_left)
 	_set_phase(Phase.BODY)
@@ -55,42 +61,46 @@ func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	panel = PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.PINK, UiStyle.NAVY, 20))
+	panel.add_theme_stylebox_override("panel", UiStyle.panel(UiStyle.PINK, UiStyle.NAVY, 16))
 	layer.add_child(panel)
 	panel.position = Vector2(980, 0)
 	panel.size = Vector2(300, 720)
 	panel.custom_minimum_size = Vector2(300, 720)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 12)
+	v.add_theme_constant_override("separation", 8)
 	panel.add_child(v)
 
 	phase_label = Label.new()
 	phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	phase_label.add_theme_font_size_override("font_size", 26)
+	phase_label.add_theme_font_size_override("font_size", 24)
 	phase_label.add_theme_color_override("font_color", UiStyle.YELLOW)
 	UiStyle.outline(phase_label, 5)
 	v.add_child(phase_label)
 
 	timer_label = Label.new()
 	timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	timer_label.add_theme_font_size_override("font_size", 72)
+	timer_label.add_theme_font_size_override("font_size", 64)
 	UiStyle.outline(timer_label, 10)
 	v.add_child(timer_label)
 
 	status = Label.new()
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	status.add_theme_font_size_override("font_size", 20)
+	status.add_theme_font_size_override("font_size", 18)
 	UiStyle.outline(status, 4)
 	v.add_child(status)
 
-	next_btn = UiStyle.make_button("NEXT: WEAPON", UiStyle.GREEN, 76, 24, false)
+	palette = SwatchPicker.new()
+	palette.picked.connect(_on_color)
+	v.add_child(palette)
+
+	next_btn = UiStyle.make_button("NEXT: WEAPON", UiStyle.GREEN, 66, 24, false)
 	next_btn.pressed.connect(_advance)
 	v.add_child(next_btn)
-	undo_btn = UiStyle.make_button("Undo", UiStyle.BLUE, 56, 24, false)
+	undo_btn = UiStyle.make_button("Undo", UiStyle.BLUE, 52, 22, false)
 	undo_btn.pressed.connect(canvas.undo_last_stroke)
 	v.add_child(undo_btn)
-	clear_btn = UiStyle.make_button("Clear", UiStyle.RED, 56, 24, false)
+	clear_btn = UiStyle.make_button("Clear", UiStyle.RED, 52, 22, false)
 	clear_btn.pressed.connect(_clear)
 	v.add_child(clear_btn)
 
@@ -109,12 +119,16 @@ func _set_phase(p: Phase) -> void:
 			next_btn.text = "DONE"
 			next_btn.disabled = false
 			status.text = "Draw your weapon (optional). It shrinks to fit automatically."
+		Phase.PICK:
+			phase_label.text = "CHOOSE!"
+			timer_label.text = ""
 		Phase.WAIT:
 			phase_label.text = "DONE!"
 			timer_label.text = ""
 			next_btn.visible = false
 			undo_btn.visible = false
 			clear_btn.visible = false
+			palette.visible = false
 			status.text = "Waiting for the opponent to finish drawing..."
 
 func _process(delta: float) -> void:
@@ -131,6 +145,13 @@ func _on_stroke(is_valid: bool) -> void:
 	if phase == Phase.BODY:
 		next_btn.disabled = not is_valid
 
+func _on_color(c: Color) -> void:
+	if phase == Phase.BODY:
+		body_color = c
+	else:
+		weapon_color = c
+	canvas.set_pen(c)
+
 func _clear() -> void:
 	if phase == Phase.WEAPON:
 		canvas.clear_weapon_strokes()
@@ -146,16 +167,19 @@ func _advance() -> void:
 			for k in 24:
 				circle.append(Vector2.RIGHT.rotated(TAU * k / 24.0) * 120.0)
 			circle.append(circle[0])
-			canvas.load_shape([circle], [])
+			canvas.load_shape([circle], [], body_color)
 			shape = canvas.build_shape()
 		body_data = shape
 		canvas.enter_weapon_mode()
+		canvas.pen_color = weapon_color
+		palette.select(weapon_color)
 		_set_phase(Phase.WEAPON)
 	elif phase == Phase.WEAPON:
 		_finish()
 
+# ---------- Finish drawing, then pick weapon and ultimate ----------
+
 func _finish() -> void:
-	var my_i := 0 if Net.is_host else 1
 	var raw: Array = canvas.weapon_strokes()
 	var weapon := {}
 	if not raw.is_empty():
@@ -174,11 +198,11 @@ func _finish() -> void:
 			for p in ShapeUtils.offset_points(s, -wcenter):
 				shrunk.append(p * fit)
 			wstrokes.append(shrunk)
-		weapon = {"type": 1, "strokes": wstrokes}
+		weapon = {"type": 1, "strokes": wstrokes, "color": weapon_color}
 
 	pending_top = {
 		"area": body_data["area"],
-		"color": COLORS[my_i],
+		"color": body_color,
 		"strokes": body_data["strokes_local"],
 		"weapon": weapon,
 		"name": "Speed Draw",
@@ -187,7 +211,7 @@ func _finish() -> void:
 	_start_picking()
 
 func _start_picking() -> void:
-	phase = Phase.PICK
+	_set_phase(Phase.PICK)
 	canvas.visible = false
 	canvas.enabled = false
 	panel.visible = false
@@ -239,14 +263,17 @@ func _show_ult_picker() -> void:
 
 func _picks_done(ult: int) -> void:
 	picker_layer.queue_free()
-	pending_top["weapon"]["type"] = weapon_choice if has_weapon else 1
+	if has_weapon:
+		pending_top["weapon"]["type"] = weapon_choice
 	Net.my = {"top": pending_top, "weapon": weapon_choice, "ult": ult}
 	Net.send({"t": "drawn", "top": GameData.export_dict(pending_top),
 			"weapon": weapon_choice, "ult": ult})
 	my_done = true
-	_set_phase(Phase.WAIT)
 	panel.visible = true
+	_set_phase(Phase.WAIT)
 	_check_start()
+
+# ---------- Network ----------
 
 func _check_start() -> void:
 	if Net.is_host and my_done and opp_done:

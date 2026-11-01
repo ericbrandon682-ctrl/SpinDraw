@@ -26,6 +26,8 @@ var current_line: Line2D = null
 var is_drawing := false
 var enabled := true
 var box: Rect2
+var pen_color := Color.WHITE
+var body_pen := Color.WHITE
 
 # Weapon mode
 var weapon_mode := false
@@ -99,7 +101,7 @@ func _start(pos: Vector2) -> void:
 	current = PackedVector2Array()
 	current_line = Line2D.new()
 	current_line.width = STROKE_WIDTH
-	current_line.default_color = WEAPON_COLOR if weapon_mode else STROKE_COLOR
+	current_line.default_color = pen_color
 	current_line.joint_mode = Line2D.LINE_JOINT_ROUND
 	current_line.begin_cap_mode = Line2D.LINE_CAP_ROUND
 	current_line.end_cap_mode = Line2D.LINE_CAP_ROUND
@@ -107,6 +109,13 @@ func _start(pos: Vector2) -> void:
 	add_child(current_line)
 	_add(_constrain(pos))
 	stroke_changed.emit(false)
+	
+## Sets the pen color and recolors the strokes of the current step.
+func set_pen(c: Color) -> void:
+	pen_color = c
+	var start := body_count if weapon_mode else 0
+	for i in range(start, lines.size()):
+		lines[i].default_color = c
 
 func _continue(pos: Vector2) -> void:
 	pos = _constrain(pos)
@@ -195,19 +204,21 @@ func build_shape() -> Dictionary:
 
 func enter_weapon_mode() -> void:
 	weapon_mode = true
+	body_pen = pen_color
 	body_count = strokes.size()
 	wb_has = false
 	for l in lines:
-		l.visible = false   # hide the body while drawing the weapon
+		l.visible = false
 	queue_redraw()
 
 func exit_weapon_mode() -> void:
 	clear_weapon_strokes()
 	weapon_mode = false
 	body_count = 0
+	pen_color = body_pen
 	for l in lines:
 		l.visible = true
-		l.default_color = STROKE_COLOR
+		l.default_color = body_pen
 	queue_redraw()
 
 func weapon_strokes() -> Array:
@@ -266,18 +277,20 @@ func _bounds_center(group: Array) -> Vector2:
 		return Vector2.ZERO
 	return (mn + mx) * 0.5
 
-func load_shape(body: Array, weapon: Array) -> void:
+func load_shape(body: Array, weapon: Array, body_col := Color.WHITE, weapon_col := Color("ffb347")) -> void:
 	clear_drawing()
 	if body.is_empty():
 		return
+	pen_color = body_col
 	var body_shift := box.get_center() - _bounds_center(body)
 	for s in body:
-		_add_loaded(s, body_shift, STROKE_COLOR)
+		_add_loaded(s, body_shift, body_col)
 	if not weapon.is_empty():
 		enter_weapon_mode()
 		var weapon_shift := box.get_center() - _bounds_center(weapon)
 		for s in weapon:
-			_add_loaded(s, weapon_shift, WEAPON_COLOR)
+			_add_loaded(s, weapon_shift, weapon_col)
+		pen_color = weapon_col
 		_recompute_wb()
 	stroke_changed.emit(build_shape().size() > 0)
 

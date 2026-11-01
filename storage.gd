@@ -8,6 +8,7 @@ var empty_holder: CenterContainer
 var pending_delete := -1
 
 func _ready() -> void:
+	Audio.play_menu_music()
 	RenderingServer.set_default_clear_color(Color("07070f"))
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 

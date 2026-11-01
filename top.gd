@@ -224,7 +224,7 @@ func _setup_weapon(weapon: Dictionary, color: Color) -> void:
 	if wstrokes.is_empty():
 		weapon_type = WeaponDefs.Type.NONE
 		return
-	weapon_color = color.lightened(0.5)
+	weapon_color = weapon.get("color", color.lightened(0.5))
 	if WeaponDefs.is_melee(weapon_type):
 		_build_melee(wstrokes)
 	elif WeaponDefs.is_projectile(weapon_type):

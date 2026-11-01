@@ -103,7 +103,7 @@ func _make_top(i: int) -> Top:
 		var ws: Array = []
 		for s in w["strokes"]:
 			ws.append(_scaled(s))
-		weapon = {"type": int(d["weapon"]), "strokes": ws}
+			weapon = {"type": int(d["weapon"]), "strokes": ws, "color": w.get("color", data["color"].lightened(0.5))}
 	var top := Top.new()
 	top.setup(small, stats, data["color"], weapon)
 	top.hold()
@@ -391,6 +391,7 @@ func _countdown() -> void:
 	state = State.COUNTDOWN
 	status.text = ""
 	var id := match_id
+	Audio.play_sfx(Audio.COUNTDOWN_SFX)
 	for n in [3, 2, 1]:
 		_pop(str(n), UiStyle.YELLOW, 120)
 		Net.send({"t": "pop", "text": str(n)})
@@ -462,6 +463,7 @@ func _host_ult(who: int) -> void:
 	Net.send({"t": "fx", "who": who})
 
 func _ult_event(who: int) -> void:
+	Audio.play_sfx(Audio.ULTIMATE_SFX)
 	var mine := who == my_i
 	var col := UiStyle.YELLOW if mine else UiStyle.RED
 	Fx.flash(self, col)
@@ -493,6 +495,7 @@ func _time_up() -> void:
 		_finish(0 if p > e else 1, true)
 
 func _show_result(winner: int, timeup: bool) -> void:
+	Audio.pause_music()
 	_set_fight_ui(false)
 	var msg := "TIME UP: " if timeup else ""
 	var col := UiStyle.YELLOW
@@ -501,9 +504,11 @@ func _show_result(winner: int, timeup: bool) -> void:
 	elif winner == my_i:
 		msg += "YOU WIN!"
 		col = UiStyle.GREEN
+		Audio.play_sfx(Audio.WIN_SFX)
 	else:
 		msg += "YOU LOSE"
 		col = UiStyle.RED
+		Audio.play_sfx(Audio.LOSE_SFX)
 	if winner >= 0:
 		var loser: Top = tops[1 - winner]
 		loser.modulate = Color(1, 1, 1, 0.35)

@@ -20,6 +20,7 @@ var tops: Array = []
 var flavor: Label
 
 func _ready() -> void:
+	Audio.play_menu_music()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
@@ -56,6 +57,7 @@ func _ready() -> void:
 	box.add_child(draw_btn)
 
 	var battle_btn := UiStyle.make_button("BATTLE", UiStyle.RED, 84, 36)
+	battle_btn.set_meta("sfx",Audio.BATTLEBUTTON_SFX)
 	battle_btn.disabled = GameData.tops.is_empty()
 	battle_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://battle.tscn"))
 	box.add_child(battle_btn)
